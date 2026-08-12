@@ -1,28 +1,30 @@
 using System;
 using System.IO;
-using BepInEx;
-using BepInEx.Configuration;
+using Lunaris;
+using Lunaris.Config;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 namespace ErenshorGuildLife
 {
-    [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
-    [BepInProcess("Erenshor.exe")]
-    public sealed class ErenshorGuildLifePlugin : BaseUnityPlugin
+    [LunarisPlugin(PluginGuid, PluginVersion, "forgetwhtuno",
+        "Read-only guild-presence and verified bulletin layer. Erenshor remains authoritative for guild membership/state.")]
+    [LunarisPermission(LunarisPermission.FileAccess | LunarisPermission.Reflection)]
+    public sealed class ErenshorGuildLifePlugin : LunarisPlugin
     {
         internal const string PluginGuid = "forgetwhtuno.erenshor.guildlife";
         internal const string PluginName = "Erenshor Guild Life";
         internal const string PluginVersion = "0.1.0";
 
-        private ConfigEntry<float> _launcherX;
-        private ConfigEntry<float> _launcherY;
-        private ConfigEntry<float> _windowX;
-        private ConfigEntry<float> _windowY;
-        private ConfigEntry<float> _windowWidth;
-        private ConfigEntry<float> _windowHeight;
-        private ConfigEntry<int> _refreshSeconds;
-        private ConfigEntry<bool> _recordRosterChanges;
+        private GuildLifeSettings _settings;
+        private GuildLifeConfigEntry<float> _launcherX;
+        private GuildLifeConfigEntry<float> _launcherY;
+        private GuildLifeConfigEntry<float> _windowX;
+        private GuildLifeConfigEntry<float> _windowY;
+        private GuildLifeConfigEntry<float> _windowWidth;
+        private GuildLifeConfigEntry<float> _windowHeight;
+        private GuildLifeConfigEntry<int> _refreshSeconds;
+        private GuildLifeConfigEntry<bool> _recordRosterChanges;
 
         private GuildStore _store;
         private GuildLifeDocument _document;
@@ -43,22 +45,16 @@ namespace ErenshorGuildLife
 
         private void Awake()
         {
-            _launcherX = Config.Bind("UI", "LauncherX", -1f, "Saved Guild Life launcher X position.");
-            _launcherY = Config.Bind("UI", "LauncherY", -1f, "Saved Guild Life launcher Y position.");
-            _windowX = Config.Bind("UI", "WindowX", -1f, "Saved Guild Life window X position.");
-            _windowY = Config.Bind("UI", "WindowY", -1f, "Saved Guild Life window Y position.");
-            _windowWidth = Config.Bind("UI", "WindowWidth", 680f, "Guild Life window width in pixels.");
-            _windowHeight = Config.Bind("UI", "WindowHeight", 520f, "Guild Life window height in pixels.");
-            _refreshSeconds = Config.Bind("Guild", "RefreshSeconds", 5, "Read-only native guild roster refresh interval, clamped to 2-30 seconds.");
-            _recordRosterChanges = Config.Bind("Guild", "RecordRosterChanges", true,
-                "Record verified same-guild roster joins/leaves in the local bulletin.");
+            _settings = new GuildLifeSettings();
+            Config.Register(ref _settings);
+            InitializeConfigEntries();
 
-            string dataDirectory = Path.Combine(Paths.ConfigPath, "ErenshorGuildLife");
+            string dataDirectory = Path.Combine(Path.Combine(AppContext.BaseDirectory, "plugins", "config"), "ErenshorGuildLife");
             _store = new GuildStore(Path.Combine(dataDirectory, "bulletin.dat"));
             string warning;
             _document = _store.Load(out warning);
             if (!string.IsNullOrEmpty(warning))
-                Logger.LogWarning("Erenshor Guild Life recovered from unreadable local data. " + warning);
+                Logging.LogWarning("Erenshor Guild Life recovered from unreadable local data. " + warning);
 
             _launcher = new GuildLauncher();
             _window = new GuildWindow();
@@ -67,10 +63,22 @@ namespace ErenshorGuildLife
             _currentScene = CurrentSceneName();
             RefreshGuild(true);
 
-            Logger.LogInfo(
+            Logging.LogInfo(
                 "Erenshor Guild Life " + PluginVersion +
                 " loaded. Use the draggable GUILD LIFE UI button. No global hotkey is registered. " +
                 "Native guild state is read-only; this mod does not invite, kick, rank, recruit, or start guild quests/raids.");
+        }
+
+        private void InitializeConfigEntries()
+        {
+            _launcherX = new GuildLifeConfigEntry<float>(delegate { return _settings.LauncherX; }, delegate(float v) { _settings.LauncherX = v; });
+            _launcherY = new GuildLifeConfigEntry<float>(delegate { return _settings.LauncherY; }, delegate(float v) { _settings.LauncherY = v; });
+            _windowX = new GuildLifeConfigEntry<float>(delegate { return _settings.WindowX; }, delegate(float v) { _settings.WindowX = v; });
+            _windowY = new GuildLifeConfigEntry<float>(delegate { return _settings.WindowY; }, delegate(float v) { _settings.WindowY = v; });
+            _windowWidth = new GuildLifeConfigEntry<float>(delegate { return _settings.WindowWidth; }, delegate(float v) { _settings.WindowWidth = v; });
+            _windowHeight = new GuildLifeConfigEntry<float>(delegate { return _settings.WindowHeight; }, delegate(float v) { _settings.WindowHeight = v; });
+            _refreshSeconds = new GuildLifeConfigEntry<int>(delegate { return _settings.RefreshSeconds; }, delegate(int v) { _settings.RefreshSeconds = v; });
+            _recordRosterChanges = new GuildLifeConfigEntry<bool>(delegate { return _settings.RecordRosterChanges; }, delegate(bool v) { _settings.RecordRosterChanges = v; });
         }
 
         private void Update()
@@ -99,7 +107,7 @@ namespace ErenshorGuildLife
             }
             catch (Exception ex)
             {
-                Logger.LogError("Erenshor Guild Life update failed: " + ex);
+                Logging.LogError("Erenshor Guild Life update failed: " + ex);
             }
         }
 
@@ -129,7 +137,7 @@ namespace ErenshorGuildLife
             }
             catch (Exception ex)
             {
-                Logger.LogError("Erenshor Guild Life UI failed: " + ex);
+                Logging.LogError("Erenshor Guild Life UI failed: " + ex);
                 if (_open) CloseWindow();
             }
         }
@@ -236,7 +244,7 @@ namespace ErenshorGuildLife
             {
                 _dirty = true;
                 _saveAfter = Time.unscaledTime + 5f;
-                Logger.LogError("Erenshor Guild Life could not save local bulletin data: " +
+                Logging.LogError("Erenshor Guild Life could not save local bulletin data: " +
                                 ex.GetType().Name + ": " + ex.Message);
             }
         }
@@ -281,33 +289,21 @@ namespace ErenshorGuildLife
         {
             if (_windowX == null || _windowY == null || _windowWidth == null || _windowHeight == null) return;
             Rect rect = ClampWindowRect(_windowRect);
-            bool previous = Config.SaveOnConfigSet;
-            try
-            {
-                Config.SaveOnConfigSet = false;
-                _windowX.Value = rect.x;
-                _windowY.Value = rect.y;
-                _windowWidth.Value = rect.width;
-                _windowHeight.Value = rect.height;
-                Config.Save();
-            }
-            finally { Config.SaveOnConfigSet = previous; }
+            _windowX.Value = rect.x;
+            _windowY.Value = rect.y;
+            _windowWidth.Value = rect.width;
+            _windowHeight.Value = rect.height;
+            Config.Save();
         }
 
         private void PersistLauncherRect()
         {
             if (_launcherX == null || _launcherY == null) return;
             Rect rect = ClampLauncherRect(_launcherRect);
-            bool previous = Config.SaveOnConfigSet;
-            try
-            {
-                Config.SaveOnConfigSet = false;
-                _launcherX.Value = rect.x;
-                _launcherY.Value = rect.y;
-                Config.Save();
-                _launcherDirty = false;
-            }
-            finally { Config.SaveOnConfigSet = previous; }
+            _launcherX.Value = rect.x;
+            _launcherY.Value = rect.y;
+            Config.Save();
+            _launcherDirty = false;
         }
 
         private static string CurrentSceneName()
