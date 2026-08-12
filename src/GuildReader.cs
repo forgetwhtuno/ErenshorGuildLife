@@ -1,0 +1,265 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+using UnityEngine;
+
+namespace ErenshorGuildLife
+{
+    internal static class GuildReader
+    {
+        private static Type _gameDataType;
+        private static Type _guildManagerType;
+        private static bool _typesResolved;
+
+        internal static GuildSnapshot Read()
+        {
+            ResolveTypes();
+            GuildSnapshot result = new GuildSnapshot();
+            if (_gameDataType == null)
+            {
+                result.Diagnostic = "Assembly-CSharp GameData type was not available.";
+                return result;
+            }
+
+            result.RuntimeAvailable = true;
+            result.PlayerName = ReadPlayerName();
+
+            object guildManager = ReadStaticMember(_gameDataType, new string[] { "GuildManager", "GuildMngr" });
+            if (guildManager == null && _guildManagerType != null)
+            {
+                try { guildManager = UnityEngine.Object.FindObjectOfType(_guildManagerType); }
+                catch { }
+            }
+
+            IEnumerable guilds = ReadMember(guildManager, new string[] { "Guilds" }) as IEnumerable;
+            if (guilds == null)
+            {
+                result.Diagnostic = "Native Guilds collection was not available.";
+                return result;
+            }
+
+            Dictionary<string, TrackingInfo> tracking = ReadTracking();
+            object matchedGuild = null;
+
+            foreach (object guild in guilds)
+            {
+                if (guild == null) continue;
+                List<string> members = ReadMemberNames(guild);
+                if (members.Count == 0) continue;
+
+                bool playerMember = false;
+                for (int i = 0; i < members.Count; i++)
+                {
+                    if (!string.IsNullOrWhiteSpace(result.PlayerName) &&
+                        string.Equals(members[i], result.PlayerName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        playerMember = true;
+                        break;
+                    }
+                }
+                if (!playerMember) continue;
+
+                matchedGuild = guild;
+                result.InGuild = true;
+                result.GuildId = ReadInt(guild, new string[] { "Id", "ID", "GuildID", "GuildId" }, 0);
+                result.GuildName = ReadString(guild, new string[] { "GuildName", "Name" }, "Guild");
+
+                for (int i = 0; i < members.Count; i++)
+                {
+                    string memberName = members[i];
+                    GuildMemberSnapshot member = new GuildMemberSnapshot();
+                    member.Name = memberName;
+                    TrackingInfo info;
+                    if (tracking.TryGetValue(memberName, out info))
+                    {
+                        member.Zone = info.Zone;
+                        member.Level = info.Level;
+                    }
+                    else
+                    {
+                        member.Zone = string.Empty;
+                        member.Level = 0;
+                    }
+                    result.Members.Add(member);
+                }
+                break;
+            }
+
+            if (!result.InGuild)
+            {
+                result.Diagnostic = string.IsNullOrWhiteSpace(result.PlayerName)
+                    ? "Player name was unavailable; guild membership could not be proven."
+                    : "The player was not found in a native guild roster.";
+                return result;
+            }
+
+            result.Members.Sort(delegate(GuildMemberSnapshot a, GuildMemberSnapshot b)
+            {
+                return string.Compare(a == null ? string.Empty : a.Name,
+                                      b == null ? string.Empty : b.Name,
+                                      StringComparison.OrdinalIgnoreCase);
+            });
+            result.Diagnostic = "Native guild roster resolved read-only.";
+            return result;
+        }
+
+        private static void ResolveTypes()
+        {
+            if (_typesResolved && _gameDataType != null) return;
+            _typesResolved = true;
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
+            {
+                Assembly assembly = assemblies[i];
+                Type gameData = null;
+                try { gameData = assembly.GetType("GameData", false); } catch { }
+                if (gameData == null) continue;
+                _gameDataType = gameData;
+                try { _guildManagerType = assembly.GetType("GuildManager", false); } catch { }
+                return;
+            }
+        }
+
+        private static string ReadPlayerName()
+        {
+            object slot = ReadStaticMember(_gameDataType, new string[] { "CurrentCharacterSlot", "ActiveSaveSlot" });
+            string name = ReadString(slot, new string[] { "CharName", "CharacterName", "Name" }, string.Empty);
+            if (!string.IsNullOrWhiteSpace(name)) return name;
+
+            object control = ReadStaticMember(_gameDataType, new string[] { "PlayerControl" });
+            Component component = control as Component;
+            if (component != null && component.gameObject != null)
+            {
+                string fallback = component.gameObject.name;
+                if (!string.IsNullOrWhiteSpace(fallback)) return fallback.Trim();
+            }
+            return string.Empty;
+        }
+
+        private static Dictionary<string, TrackingInfo> ReadTracking()
+        {
+            Dictionary<string, TrackingInfo> result =
+                new Dictionary<string, TrackingInfo>(StringComparer.OrdinalIgnoreCase);
+
+            object simManager = ReadStaticMember(_gameDataType, new string[] { "SimMngr", "SimManager" });
+            IEnumerable sims = ReadMember(simManager, new string[] { "Sims" }) as IEnumerable;
+            if (sims == null) return result;
+
+            foreach (object tracking in sims)
+            {
+                if (tracking == null) continue;
+                string name = ReadString(tracking, new string[] { "SimName", "Name" }, string.Empty);
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                TrackingInfo value = new TrackingInfo();
+                value.Zone = ReadString(tracking, new string[] { "CurScene", "CurrentScene", "Scene", "Zone" }, string.Empty);
+                value.Level = ReadInt(tracking, new string[] { "Level", "CurrentLevel", "SimLevel" }, 0);
+                result[name] = value;
+            }
+            return result;
+        }
+
+        private static List<string> ReadMemberNames(object guild)
+        {
+            List<string> result = new List<string>();
+            IEnumerable members = ReadMember(guild, new string[] { "GuildMembers", "Members", "MemberNames" }) as IEnumerable;
+            if (members == null) return result;
+
+            foreach (object raw in members)
+            {
+                string name = MemberName(raw);
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                if (!Contains(result, name)) result.Add(name);
+            }
+            return result;
+        }
+
+        private static string MemberName(object value)
+        {
+            if (value == null) return string.Empty;
+            string direct = value as string;
+            if (!string.IsNullOrWhiteSpace(direct)) return direct.Trim();
+
+            string reflected = ReadString(value,
+                new string[] { "SimName", "MemberName", "CharacterName", "Name" },
+                string.Empty);
+            if (!string.IsNullOrWhiteSpace(reflected)) return reflected.Trim();
+
+            try
+            {
+                string converted = Convert.ToString(value);
+                return string.IsNullOrWhiteSpace(converted) ? string.Empty : converted.Trim();
+            }
+            catch { return string.Empty; }
+        }
+
+        private static bool Contains(List<string> values, string value)
+        {
+            for (int i = 0; i < values.Count; i++)
+                if (string.Equals(values[i], value, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        private static object ReadStaticMember(Type type, string[] names)
+        {
+            if (type == null || names == null) return null;
+            for (int i = 0; i < names.Length; i++)
+            {
+                try
+                {
+                    FieldInfo field = type.GetField(names[i], BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                    if (field != null) return field.GetValue(null);
+                    PropertyInfo property = type.GetProperty(names[i], BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                    if (property != null && property.GetIndexParameters().Length == 0) return property.GetValue(null, null);
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        private static object ReadMember(object target, string[] names)
+        {
+            if (target == null || names == null) return null;
+            Type type = target.GetType();
+            for (int i = 0; i < names.Length; i++)
+            {
+                try
+                {
+                    FieldInfo field = type.GetField(names[i], BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (field != null) return field.GetValue(target);
+                    PropertyInfo property = type.GetProperty(names[i], BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                    if (property != null && property.GetIndexParameters().Length == 0) return property.GetValue(target, null);
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        private static string ReadString(object target, string[] names, string fallback)
+        {
+            object value = ReadMember(target, names);
+            if (value == null) return fallback;
+            try
+            {
+                string text = Convert.ToString(value);
+                return string.IsNullOrWhiteSpace(text) ? fallback : text.Trim();
+            }
+            catch { return fallback; }
+        }
+
+        private static int ReadInt(object target, string[] names, int fallback)
+        {
+            object value = ReadMember(target, names);
+            if (value == null) return fallback;
+            try { return Convert.ToInt32(value); }
+            catch { return fallback; }
+        }
+
+        private sealed class TrackingInfo
+        {
+            internal string Zone;
+            internal int Level;
+        }
+    }
+}
