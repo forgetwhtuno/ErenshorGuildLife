@@ -1,10 +1,10 @@
-param([string]$BepInExRoot = "")
+param([string]$GameDir = "")
 $ErrorActionPreference = "Stop"
-if (-not $BepInExRoot) { throw "Pass -BepInExRoot pointing at the profile/root that contains BepInEx." }
-$pluginDir = Join-Path $BepInExRoot "BepInEx\plugins\ErenshorGuildLife"
-if (Test-Path $pluginDir) {
-    Remove-Item -Recurse -Force $pluginDir
-    Write-Host "Removed Erenshor Guild Life plugin files." -ForegroundColor Green
+if (-not $GameDir) { throw "Pass -GameDir pointing at the Erenshor install folder (contains Erenshor.exe)." }
+$dll = Join-Path $GameDir "plugins\ErenshorGuildLife.dll"
+if (Test-Path $dll) {
+    Remove-Item -Force $dll
+    Write-Host "Removed Erenshor Guild Life plugin file." -ForegroundColor Green
 }
-else { Write-Host "Erenshor Guild Life plugin folder was not present." }
-Write-Host "Saved bulletin data under BepInEx\config\ErenshorGuildLife is intentionally left in place." -ForegroundColor Yellow
+else { Write-Host "Erenshor Guild Life plugin file was not present." }
+Write-Host "Saved bulletin data under plugins\config\ErenshorGuildLife is intentionally left in place." -ForegroundColor Yellow

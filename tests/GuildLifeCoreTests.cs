@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using ErenshorGuildLife;
 
 internal static class GuildLifeCoreTests
@@ -13,6 +14,13 @@ internal static class GuildLifeCoreTests
             TestGuildChangeDoesNotFakeDelta();
             TestBulletinDuplicateSuppression();
             TestBulletinBound();
+            TestCharacterKeyWithSlot();
+            TestCharacterKeyWithoutSlot();
+            TestCharacterKeySanitizesUnsafeCharacters();
+            TestLegacyClaimImportsOnce();
+            TestLegacyClaimSkippedWhenNoLegacyFile();
+            TestLegacyClaimNeverOverwritesExistingCharacterData();
+            TestLauncherDragAndButtonRectsDoNotOverlap();
             Console.WriteLine("PASS Erenshor Guild Life core - " + _assertions.ToString() + " assertions");
             return 0;
         }
@@ -21,6 +29,100 @@ internal static class GuildLifeCoreTests
             Console.Error.WriteLine("FAIL Erenshor Guild Life core: " + ex.Message);
             return 1;
         }
+    }
+
+    private static void TestCharacterKeyWithSlot()
+    {
+        string key = GuildLifeCore.ComposeCharacterKey("Aveline", 2);
+        Equal("slot2_aveline", key, "slot-qualified key");
+    }
+
+    private static void TestCharacterKeyWithoutSlot()
+    {
+        string key = GuildLifeCore.ComposeCharacterKey("Aveline", -1);
+        Equal("aveline", key, "name-only key when slot unresolved");
+    }
+
+    private static void TestCharacterKeySanitizesUnsafeCharacters()
+    {
+        string key = GuildLifeCore.SafeCharacterKey("We!rd Name-42");
+        True(key.IndexOf('!') < 0 && key.IndexOf(' ') < 0 && key.IndexOf('-') < 0, "unsafe characters replaced");
+        Equal("we_rd_name_42", key, "sanitized key");
+    }
+
+    private static void TestLegacyClaimImportsOnce()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "GuildLifeTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            string legacy = Path.Combine(root, "bulletin.dat");
+            string marker = Path.Combine(root, "bulletin.dat.claimed");
+            string targetA = Path.Combine(root, "Characters", "a", "bulletin.dat");
+            string targetB = Path.Combine(root, "Characters", "b", "bulletin.dat");
+            File.WriteAllText(legacy, "ERENSHOR_GUILD_LIFE_V1");
+
+            True(LegacyBulletinClaim.TryClaim(legacy, marker, targetA), "first character claims legacy data");
+            True(File.Exists(targetA), "legacy data copied to first character");
+            True(File.Exists(legacy), "legacy file preserved, not deleted");
+            True(File.Exists(marker), "claim marker written");
+
+            True(!LegacyBulletinClaim.TryClaim(legacy, marker, targetB), "second character cannot claim");
+            True(!File.Exists(targetB), "second character starts fresh, no import");
+        }
+        finally { TryDelete(root); }
+    }
+
+    private static void TestLegacyClaimSkippedWhenNoLegacyFile()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "GuildLifeTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string legacy = Path.Combine(root, "bulletin.dat");
+            string marker = Path.Combine(root, "bulletin.dat.claimed");
+            string target = Path.Combine(root, "Characters", "a", "bulletin.dat");
+            True(!LegacyBulletinClaim.TryClaim(legacy, marker, target), "no legacy file means no claim");
+            True(!File.Exists(target), "nothing imported");
+        }
+        finally { TryDelete(root); }
+    }
+
+    private static void TestLegacyClaimNeverOverwritesExistingCharacterData()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "GuildLifeTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            string legacy = Path.Combine(root, "bulletin.dat");
+            string marker = Path.Combine(root, "bulletin.dat.claimed");
+            string target = Path.Combine(root, "Characters", "a", "bulletin.dat");
+            File.WriteAllText(legacy, "ERENSHOR_GUILD_LIFE_V1");
+            Directory.CreateDirectory(Path.GetDirectoryName(target));
+            File.WriteAllText(target, "already has its own data");
+
+            True(!LegacyBulletinClaim.TryClaim(legacy, marker, target), "existing character data blocks claim");
+            Equal("already has its own data", File.ReadAllText(target), "existing character data left untouched");
+        }
+        finally { TryDelete(root); }
+    }
+
+    // Guards against the launcher regressing to a full-width DragWindow rect sitting on top of the
+    // button rect (the confirmed root cause of "click doesn't visibly open" / "can't be dragged").
+    // A click landing inside both rects at once is ambiguous to Unity's IMGUI event handling.
+    private static void TestLauncherDragAndButtonRectsDoNotOverlap()
+    {
+        PureRect drag = LauncherLayout.DragRect();
+        PureRect button = LauncherLayout.ButtonRect();
+        True(!drag.Overlaps(button), "launcher drag rect and button rect must not overlap");
+        True(drag.Width > 0f && drag.Height > 0f, "drag rect has positive area");
+        True(button.Width > 0f && button.Height > 0f, "button rect has positive area");
+        True(drag.X + drag.Width <= LauncherLayout.Width, "drag rect stays within launcher width");
+        True(button.X + button.Width <= LauncherLayout.Width, "button rect stays within launcher width");
+    }
+
+    private static void TryDelete(string root)
+    {
+        try { if (Directory.Exists(root)) Directory.Delete(root, true); } catch { }
     }
 
     private static void TestRosterDiff()

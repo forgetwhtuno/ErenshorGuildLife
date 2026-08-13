@@ -13,7 +13,7 @@ The goal is not to replace Erenshor's Guild Manager. The goal is to make guild m
 - records verified same-guild roster joins/leaves observed during the running session;
 - keeps a bounded local Guild Bulletin;
 - exposes `GuildLifeApi.PostVerifiedEvent(...)` so other mods can post facts they already verified;
-- local sidecar persistence under `BepInEx/config/ErenshorGuildLife/`.
+- local sidecar persistence under `plugins/config/ErenshorGuildLife/`.
 
 ## What it deliberately does not do
 
@@ -88,11 +88,15 @@ It is a read-only roster/bulletin layer.
 
 ## Build / install
 
+This version requires **native Lunaris** — BepInEx is no longer required.
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\BUILD_AND_INSTALL.ps1
 ```
 
-This Preview references only BepInEx + stable Unity assemblies at compile time. Native Erenshor guild objects are discovered through reflection at runtime.
+The script locates the current Erenshor install and the Lunaris developer reference, compiles, and installs only `ErenshorGuildLife.dll` to `<Erenshor>\plugins\`. Lunaris manages enable/disable and config; local bulletin state moves to `plugins\config\ErenshorGuildLife\`. Native Erenshor guild objects are discovered through reflection at runtime, unchanged. A legacy BepInEx release remains available in this repository's Git history.
+
+**Status:** this native build compiles cleanly against the installed Lunaris/Assembly-CSharp and passes its deterministic test suite. It has not yet been live-tested in-game under Lunaris (enable/disable/reload behavior). Do not assume hot-reload safety until that pass is done.
 
 ## Testing
 

@@ -42,6 +42,15 @@ namespace ErenshorGuildLife
             get { return _requestClose; }
         }
 
+        // Called on a verified character switch so scroll position and the selected tab from the
+        // outgoing character never carry over into the incoming character's window.
+        internal void ResetTransientState()
+        {
+            _tab = TabRoster;
+            _rosterScroll = Vector2.zero;
+            _bulletinScroll = Vector2.zero;
+        }
+
         internal Rect Draw(Rect rect, GuildSnapshot snapshot, GuildLifeDocument document, Action clearBulletin)
         {
             EnsureStyles();
