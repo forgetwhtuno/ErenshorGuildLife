@@ -16,6 +16,7 @@ $out = Join-Path $env:TEMP "ErenshorGuildLifeCoreTests.exe"
 & $csc /nologo /target:exe /out:$out `
     (Join-Path $ScriptRoot "src\GuildModels.cs") `
     (Join-Path $ScriptRoot "src\GuildLifeCore.cs") `
+    (Join-Path $ScriptRoot "src\GuildStore.cs") `
     (Join-Path $ScriptRoot "tests\GuildLifeCoreTests.cs")
 if ($LASTEXITCODE -ne 0) { throw "Guild Life core tests did not compile." }
 & $out

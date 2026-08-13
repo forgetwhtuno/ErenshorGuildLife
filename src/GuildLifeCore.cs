@@ -1,11 +1,28 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace ErenshorGuildLife
 {
     internal static class GuildLifeCore
     {
         internal const int MaxBulletinEntries = 200;
+
+        // Two save slots can hold the same character name, so persistence keys from the verified
+        // slot index when the slot's recorded name matches the live character, and from the name
+        // alone otherwise. Mirrors the proven pattern from Erenshor-Nemesis's
+        // NemesisDirector.ResolveCharacterKey/SafeKey. Kept Unity-free so it is directly testable.
+        internal static string ComposeCharacterKey(string playerName, int slotIndex)
+        {
+            return slotIndex >= 0
+                ? "slot" + slotIndex + "_" + SafeCharacterKey(playerName)
+                : SafeCharacterKey(playerName);
+        }
+
+        internal static string SafeCharacterKey(string value)
+        {
+            return new string((value ?? "player").ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '_').Take(48).ToArray());
+        }
 
         internal static GuildRosterDelta DiffRosters(GuildSnapshot previous, GuildSnapshot current)
         {

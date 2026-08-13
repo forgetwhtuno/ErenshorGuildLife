@@ -116,4 +116,34 @@ namespace ErenshorGuildLife
             return Encoding.UTF8.GetString(Convert.FromBase64String(value));
         }
     }
+
+    // Guild Life moved from one global bulletin.dat to a per-character bulletin. That legacy file
+    // can already hold real recorded history, so it is never deleted or truncated. Instead, exactly
+    // one character - the first to load after this migration - may claim (import a copy of) it. A
+    // companion claim-marker file makes the claim permanent and testable: once it exists, no later
+    // character can claim the legacy data, and every character after the first-claimer starts fresh.
+    internal static class LegacyBulletinClaim
+    {
+        internal static bool TryClaim(string legacyPath, string claimMarkerPath, string targetPath)
+        {
+            try
+            {
+                if (string.IsNullOrWhiteSpace(legacyPath) || string.IsNullOrWhiteSpace(claimMarkerPath) || string.IsNullOrWhiteSpace(targetPath))
+                    return false;
+                if (!File.Exists(legacyPath)) return false;
+                if (File.Exists(claimMarkerPath)) return false;
+                if (File.Exists(targetPath)) return false; // never overwrite an existing character bulletin
+
+                string directory = Path.GetDirectoryName(targetPath);
+                if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
+                File.Copy(legacyPath, targetPath, false);
+
+                string markerDirectory = Path.GetDirectoryName(claimMarkerPath);
+                if (!string.IsNullOrWhiteSpace(markerDirectory)) Directory.CreateDirectory(markerDirectory);
+                File.WriteAllText(claimMarkerPath, DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+                return true;
+            }
+            catch { return false; }
+        }
+    }
 }

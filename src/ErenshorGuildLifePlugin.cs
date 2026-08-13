@@ -47,6 +47,14 @@ namespace ErenshorGuildLife
         private CursorLockMode _cursorLockBeforeOpen;
         private string _currentScene;
 
+        // Character-scoped bulletin storage. Guild Life used to load one global bulletin.dat at
+        // Awake, before any character existed. Now nothing character-specific (bulletin data, the
+        // native guild snapshot) is touched until IsLocalCharacterReady() is verified true.
+        private string _dataRoot;
+        private string _legacyBulletinPath;
+        private string _legacyClaimMarkerPath;
+        private string _characterKey = "";
+
         private void Awake()
         {
             Instance = this;
@@ -54,19 +62,19 @@ namespace ErenshorGuildLife
             Config.Register(ref _settings);
             InitializeConfigEntries();
 
-            string dataDirectory = Path.Combine(Path.Combine(AppContext.BaseDirectory, "plugins", "config"), "ErenshorGuildLife");
-            _store = new GuildStore(Path.Combine(dataDirectory, "bulletin.dat"));
-            string warning;
-            _document = _store.Load(out warning);
-            if (!string.IsNullOrEmpty(warning))
-                Logging.LogWarning("Erenshor Guild Life recovered from unreadable local data. " + warning);
+            _dataRoot = Path.Combine(Path.Combine(AppContext.BaseDirectory, "plugins", "config"), "ErenshorGuildLife");
+            _legacyBulletinPath = Path.Combine(_dataRoot, "bulletin.dat");
+            _legacyClaimMarkerPath = Path.Combine(_dataRoot, "bulletin.dat.claimed");
 
             _launcher = new GuildLauncher();
             _window = new GuildWindow();
             _launcherRect = ResolveInitialLauncherRect();
             _windowRect = ResolveInitialWindowRect();
             _currentScene = CurrentSceneName();
-            RefreshGuild(true);
+
+            // Deliberately no bulletin load and no native guild read here: at Awake there is no
+            // verified player character yet (title screen, login, character select can all reach
+            // this point). Both happen only once IsLocalCharacterReady() is true, from Update().
 
             _harmony = new Harmony(PluginGuid);
             _harmony.PatchAll();
@@ -75,6 +83,106 @@ namespace ErenshorGuildLife
                 "Erenshor Guild Life " + PluginVersion +
                 " loaded. Use the draggable GUILD LIFE UI button. No global hotkey is registered. " +
                 "Native guild state is read-only; this mod does not invite, kick, rank, recruit, or start guild quests/raids.");
+        }
+
+        // Verified player-ready signal (matches Erenshor-Nemesis's NemesisDirector.Ready(), already
+        // live-tested there). Scene-name matching alone is not reliable: Erenshor appears to keep a
+        // single persistent Unity scene across title/character-select/gameplay, so a scene-name
+        // heuristic can't distinguish them. This checks the actual player object instead, and is
+        // re-evaluated every frame rather than cached across scene loads.
+        private static bool IsLocalCharacterReady()
+        {
+            try
+            {
+                return !GameData.InCharSelect && GameData.PlayerControl != null && GameData.PlayerControl.Myself != null &&
+                    GameData.PlayerControl.Myself.MyStats != null && GameData.PlayerControl.Myself.gameObject.activeInHierarchy;
+            }
+            catch { return false; }
+        }
+
+        private static string PlayerName()
+        {
+            try
+            {
+                string name = GameData.PlayerControl.Myself.MyStats.MyName;
+                return string.IsNullOrWhiteSpace(name) ? "Player" : name.Trim();
+            }
+            catch { return "Player"; }
+        }
+
+        private static int ResolveSlotIndex()
+        {
+            try
+            {
+                SaveGameData active = GameData.CurrentCharacterSlot != null ? GameData.CurrentCharacterSlot : GameData.ActiveSaveSlot;
+                if (active == null || active.index < 0) return -1;
+                string recorded = (active.CharName ?? "").Trim();
+                if (recorded.Length > 0 && !string.Equals(recorded, PlayerName(), StringComparison.OrdinalIgnoreCase)) return -1;
+                return active.index;
+            }
+            catch { return -1; }
+        }
+
+        private static string ResolveCharacterKey()
+        {
+            return GuildLifeCore.ComposeCharacterKey(PlayerName(), ResolveSlotIndex());
+        }
+
+        // Runs once per frame while ready; a no-op unless the resolved character key changed.
+        // Mirrors Erenshor-Nemesis's NemesisDirector.EnsureCharacter() switch sequence: save+close
+        // the outgoing character, then load (or legacy-claim then load) the incoming one and refresh
+        // its native guild snapshot. Character A's bulletin/snapshot must never leak into B's window.
+        private void EnsureCharacter()
+        {
+            string key = ResolveCharacterKey();
+            if (string.Equals(key, _characterKey, StringComparison.Ordinal)) return;
+
+            if (_characterKey.Length > 0)
+            {
+                SaveNow();
+                if (_open) CloseWindow();
+            }
+
+            _store = null;
+            _document = null;
+            _characterKey = key;
+            LoadCharacterBulletin(key);
+            RefreshGuild(true);
+            if (_window != null) _window.ResetTransientState();
+            Logging.LogInfo("Erenshor Guild Life character ready. key=" + key);
+        }
+
+        private void LoadCharacterBulletin(string key)
+        {
+            string targetPath = Path.Combine(Path.Combine(Path.Combine(_dataRoot, "Characters"), key), "bulletin.dat");
+
+            // First character to load after the per-character migration may claim (import a copy
+            // of) the pre-existing global bulletin.dat exactly once. The legacy file itself is never
+            // modified or deleted; every character after the first-claimer starts fresh.
+            if (LegacyBulletinClaim.TryClaim(_legacyBulletinPath, _legacyClaimMarkerPath, targetPath))
+                Logging.LogInfo("Erenshor Guild Life legacy bulletin claimed by character. key=" + key);
+
+            _store = new GuildStore(targetPath);
+            string warning;
+            _document = _store.Load(out warning);
+            if (!string.IsNullOrEmpty(warning))
+                Logging.LogWarning("Erenshor Guild Life recovered from unreadable local data for " + key + ". " + warning);
+            _dirty = false;
+        }
+
+        // Per user's explicit lifecycle requirement: on character unload, save, clear the native
+        // guild snapshot, close the panel, and stop refresh work until another character is ready.
+        private void UnloadCharacter()
+        {
+            SaveNow();
+            if (_open) CloseWindow();
+            _snapshot = null;
+            _document = null;
+            _store = null;
+            string previousKey = _characterKey;
+            _characterKey = "";
+            if (previousKey.Length > 0)
+                Logging.LogInfo("Erenshor Guild Life character unloaded; native guild snapshot cleared. key=" + previousKey);
         }
 
         private void InitializeConfigEntries()
@@ -93,22 +201,30 @@ namespace ErenshorGuildLife
         {
             try
             {
-                PendingGuildEvent pending;
-                while (GuildLifeApi.TryDequeue(out pending))
-                {
-                    if (GuildLifeCore.AppendBulletin(_document, pending.TimestampUtc, pending.Source, pending.Category, pending.Actor, pending.Text))
-                        MarkDirty();
-                }
+                // Recomputed every frame, never cached across scene loads.
+                bool ready = IsLocalCharacterReady();
+                if (ready) EnsureCharacter();
+                else if (_characterKey.Length > 0) UnloadCharacter();
 
-                string scene = CurrentSceneName();
-                if (!string.Equals(scene, _currentScene, StringComparison.Ordinal))
+                if (ready && _document != null)
                 {
-                    _currentScene = scene;
-                    RefreshGuild(false);
-                }
+                    PendingGuildEvent pending;
+                    while (GuildLifeApi.TryDequeue(out pending))
+                    {
+                        if (GuildLifeCore.AppendBulletin(_document, pending.TimestampUtc, pending.Source, pending.Category, pending.Actor, pending.Text))
+                            MarkDirty();
+                    }
 
-                if (Time.unscaledTime >= _nextRefresh)
-                    RefreshGuild(false);
+                    string scene = CurrentSceneName();
+                    if (!string.Equals(scene, _currentScene, StringComparison.Ordinal))
+                    {
+                        _currentScene = scene;
+                        RefreshGuild(false);
+                    }
+
+                    if (Time.unscaledTime >= _nextRefresh)
+                        RefreshGuild(false);
+                }
 
                 if (_dirty && Time.unscaledTime >= _saveAfter) SaveNow();
                 if (_launcherDirty && Time.unscaledTime >= _launcherSaveAfter) PersistLauncherRect();
@@ -123,13 +239,16 @@ namespace ErenshorGuildLife
         {
             try
             {
-                if (!IsUsableScene(_currentScene))
+                // Player-ready is the single visibility gate: no launcher, no window, before a real
+                // playable character exists. Recomputed every OnGUI call so a character unload mid-
+                // session (e.g. logout to character select) closes the panel immediately.
+                if (!IsLocalCharacterReady())
                 {
                     if (_open) CloseWindow();
                     return;
                 }
 
-                if (_open && _window != null)
+                if (_open && _window != null && _document != null)
                 {
                     _windowRect = ClampWindowRect(_window.Draw(_windowRect, _snapshot, _document, ClearBulletin));
                     if (_window.RequestClose) CloseWindow();
@@ -140,7 +259,11 @@ namespace ErenshorGuildLife
                     Rect previous = _launcherRect;
                     _launcherRect = ClampLauncherRect(_launcher.Draw(_launcherRect, _open));
                     if (!RectsNearlyEqual(previous, _launcherRect)) MarkLauncherDirty();
-                    if (_launcher.RequestToggle) ToggleWindow();
+                    if (_launcher.RequestToggle)
+                    {
+                        Logging.LogInfo("Erenshor Guild Life launcher clicked. open_before=" + _open);
+                        ToggleWindow();
+                    }
                 }
             }
             catch (Exception ex)
@@ -176,6 +299,7 @@ namespace ErenshorGuildLife
             _document = null;
             _store = null;
             _snapshot = null;
+            _characterKey = "";
             if (Instance == this) Instance = null;
         }
 
@@ -224,6 +348,7 @@ namespace ErenshorGuildLife
             _cursorLockBeforeOpen = Cursor.lockState;
             Cursor.visible = true;
             Cursor.lockState = CursorLockMode.None;
+            Logging.LogInfo("Erenshor Guild Life window opened. key=" + _characterKey);
         }
 
         private void CloseWindow()
@@ -233,6 +358,7 @@ namespace ErenshorGuildLife
             SaveNow();
             PersistWindowRect();
             RestoreCursor();
+            Logging.LogInfo("Erenshor Guild Life window closed. key=" + _characterKey);
         }
 
         private void RestoreCursor()
@@ -332,18 +458,6 @@ namespace ErenshorGuildLife
         {
             try { return SceneManager.GetActiveScene().name ?? string.Empty; }
             catch { return string.Empty; }
-        }
-
-        private static bool IsUsableScene(string scene)
-        {
-            if (string.IsNullOrWhiteSpace(scene)) return false;
-            string lower = scene.ToLowerInvariant();
-            if (lower.IndexOf("title", StringComparison.Ordinal) >= 0 ||
-                lower.IndexOf("login", StringComparison.Ordinal) >= 0 ||
-                lower.IndexOf("characterselect", StringComparison.Ordinal) >= 0 ||
-                lower.IndexOf("mainmenu", StringComparison.Ordinal) >= 0)
-                return false;
-            return true;
         }
 
         private static bool RectsNearlyEqual(Rect a, Rect b)
