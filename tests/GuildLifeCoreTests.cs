@@ -20,6 +20,7 @@ internal static class GuildLifeCoreTests
             TestLegacyClaimImportsOnce();
             TestLegacyClaimSkippedWhenNoLegacyFile();
             TestLegacyClaimNeverOverwritesExistingCharacterData();
+            TestLauncherDragAndButtonRectsDoNotOverlap();
             Console.WriteLine("PASS Erenshor Guild Life core - " + _assertions.ToString() + " assertions");
             return 0;
         }
@@ -103,6 +104,20 @@ internal static class GuildLifeCoreTests
             Equal("already has its own data", File.ReadAllText(target), "existing character data left untouched");
         }
         finally { TryDelete(root); }
+    }
+
+    // Guards against the launcher regressing to a full-width DragWindow rect sitting on top of the
+    // button rect (the confirmed root cause of "click doesn't visibly open" / "can't be dragged").
+    // A click landing inside both rects at once is ambiguous to Unity's IMGUI event handling.
+    private static void TestLauncherDragAndButtonRectsDoNotOverlap()
+    {
+        PureRect drag = LauncherLayout.DragRect();
+        PureRect button = LauncherLayout.ButtonRect();
+        True(!drag.Overlaps(button), "launcher drag rect and button rect must not overlap");
+        True(drag.Width > 0f && drag.Height > 0f, "drag rect has positive area");
+        True(button.Width > 0f && button.Height > 0f, "button rect has positive area");
+        True(drag.X + drag.Width <= LauncherLayout.Width, "drag rect stays within launcher width");
+        True(button.X + button.Width <= LauncherLayout.Width, "button rect stays within launcher width");
     }
 
     private static void TryDelete(string root)

@@ -5,8 +5,14 @@ namespace ErenshorGuildLife
     internal sealed class GuildLauncher
     {
         private const int WindowId = 0x4552474C;
-        internal const float Width = 126f;
-        internal const float Height = 34f;
+        internal const float Width = LauncherLayout.Width;
+        internal const float Height = LauncherLayout.Height;
+
+        // Grip strip owns dragging; the button owns clicking. These must never overlap - see
+        // DrawContents. Matches ErenshorJournal's JournalLauncher interaction model exactly.
+        // Geometry is sourced from LauncherLayout so GuildLifeCoreTests (Unity-free)
+        // can assert the two rects never overlap.
+        internal const float GripWidth = LauncherLayout.GripWidth;
 
         private bool _requestToggle;
         private bool _open;
@@ -17,6 +23,7 @@ namespace ErenshorGuildLife
         private GUIStyle _windowStyle;
         private GUIStyle _buttonStyle;
         private GUIStyle _openButtonStyle;
+        private GUIStyle _gripStyle;
 
         internal bool RequestToggle
         {
@@ -48,13 +55,22 @@ namespace ErenshorGuildLife
             _windowStyle = null;
             _buttonStyle = null;
             _openButtonStyle = null;
+            _gripStyle = null;
         }
 
         private void DrawContents(int id)
         {
-            if (GUI.Button(new Rect(5f, 5f, Width - 10f, Height - 10f), "GUILD LIFE", _open ? _openButtonStyle : _buttonStyle))
+            GUI.Label(new Rect(3f, 5f, GripWidth - 4f, Height - 10f), "||", _gripStyle);
+            GUIStyle style = _open ? _openButtonStyle : _buttonStyle;
+            PureRect buttonRect = LauncherLayout.ButtonRect();
+            if (GUI.Button(new Rect(buttonRect.X, buttonRect.Y, buttonRect.Width, buttonRect.Height), "GUILD LIFE", style))
                 _requestToggle = true;
-            GUI.DragWindow(new Rect(0f, 0f, Width, Height));
+
+            // A narrow grip owns dragging. The action surface remains a pure open/close toggle so
+            // clicking it never also moves the launcher (matches JournalLauncher's model - the
+            // overlapping full-width DragWindow rect used to swallow clicks meant for the button).
+            PureRect dragRect = LauncherLayout.DragRect();
+            GUI.DragWindow(new Rect(dragRect.X, dragRect.Y, dragRect.Width, dragRect.Height));
         }
 
         private void EnsureStyles()
@@ -75,6 +91,12 @@ namespace ErenshorGuildLife
             _buttonStyle = Button(_buttonTexture, _buttonHoverTexture);
             _openButtonStyle = Button(_buttonOpenTexture, _buttonHoverTexture);
             _openButtonStyle.fontStyle = FontStyle.Bold;
+
+            _gripStyle = new GUIStyle(GUI.skin.label);
+            _gripStyle.fontSize = 10;
+            _gripStyle.fontStyle = FontStyle.Bold;
+            _gripStyle.alignment = TextAnchor.MiddleCenter;
+            _gripStyle.normal.textColor = new Color(0.56f, 0.88f, 1f, 0.95f);
         }
 
         private static GUIStyle Button(Texture2D normal, Texture2D hover)

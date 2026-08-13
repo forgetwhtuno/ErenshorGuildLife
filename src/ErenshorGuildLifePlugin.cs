@@ -38,6 +38,15 @@ namespace ErenshorGuildLife
         private Rect _launcherRect;
         private Rect _windowRect;
         private bool _open;
+
+        // Open/close state changes are decided in OnGUI (where the click/close signals surface)
+        // but only ever performed in Update(). Mutating _open (or calling OpenWindow/CloseWindow)
+        // directly inside OnGUI can desynchronize Unity's Layout/Repaint IMGUI passes and make a
+        // just-opened window immediately appear to close again - the same bug class
+        // ErenshorContracts hit and fixed the same way. OnGUI only ever sets these request flags;
+        // Update() consumes them once per frame.
+        private bool _pendingToggle;
+        private bool _pendingClose;
         private bool _dirty;
         private float _saveAfter;
         private bool _launcherDirty;
@@ -46,6 +55,7 @@ namespace ErenshorGuildLife
         private bool _cursorVisibleBeforeOpen;
         private CursorLockMode _cursorLockBeforeOpen;
         private string _currentScene;
+        private bool _loggedDrawEntry;
 
         // Character-scoped bulletin storage. Guild Life used to load one global bulletin.dat at
         // Awake, before any character existed. Now nothing character-specific (bulletin data, the
@@ -201,6 +211,23 @@ namespace ErenshorGuildLife
         {
             try
             {
+                // OnGUI only ever sets request flags; every actual _open mutation happens here,
+                // once per frame, before anything else runs.
+                if (_pendingClose)
+                {
+                    _pendingClose = false;
+                    bool before = _open;
+                    CloseWindow();
+                    Logging.LogInfo("Erenshor Guild Life toggle consumed (close). open_before=" + before + " open_after=" + _open);
+                }
+                if (_pendingToggle)
+                {
+                    _pendingToggle = false;
+                    bool before = _open;
+                    ToggleWindow();
+                    Logging.LogInfo("Erenshor Guild Life toggle consumed (toggle). open_before=" + before + " open_after=" + _open);
+                }
+
                 // Recomputed every frame, never cached across scene loads.
                 bool ready = IsLocalCharacterReady();
                 if (ready) EnsureCharacter();
@@ -244,14 +271,19 @@ namespace ErenshorGuildLife
                 // session (e.g. logout to character select) closes the panel immediately.
                 if (!IsLocalCharacterReady())
                 {
-                    if (_open) CloseWindow();
+                    if (_open) _pendingClose = true;
                     return;
                 }
 
                 if (_open && _window != null && _document != null)
                 {
+                    if (!_loggedDrawEntry)
+                    {
+                        Logging.LogInfo("Erenshor Guild Life window Draw() entry. key=" + _characterKey);
+                        _loggedDrawEntry = true;
+                    }
                     _windowRect = ClampWindowRect(_window.Draw(_windowRect, _snapshot, _document, ClearBulletin));
-                    if (_window.RequestClose) CloseWindow();
+                    if (_window.RequestClose) _pendingClose = true;
                 }
 
                 if (_launcher != null)
@@ -262,14 +294,15 @@ namespace ErenshorGuildLife
                     if (_launcher.RequestToggle)
                     {
                         Logging.LogInfo("Erenshor Guild Life launcher clicked. open_before=" + _open);
-                        ToggleWindow();
+                        _pendingToggle = true;
+                        Logging.LogInfo("Erenshor Guild Life toggle queued.");
                     }
                 }
             }
             catch (Exception ex)
             {
                 Logging.LogError("Erenshor Guild Life UI failed: " + ex);
-                if (_open) CloseWindow();
+                if (_open) _pendingClose = true;
             }
         }
 
@@ -355,6 +388,7 @@ namespace ErenshorGuildLife
         {
             if (!_open) return;
             _open = false;
+            _loggedDrawEntry = false;
             SaveNow();
             PersistWindowRect();
             RestoreCursor();
