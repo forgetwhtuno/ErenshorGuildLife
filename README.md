@@ -6,8 +6,8 @@ The goal is not to replace Erenshor's Guild Manager. The goal is to make guild m
 
 ## What 0.1.0 does
 
-- draggable `GUILD LIFE` HUD button; **no global hotkey**;
-- draggable/resizable Party Tools / Follow-style window;
+- retained-uGUI `GUILD LIFE` launcher with Suite-style drag/fallback visibility; **no global hotkey**;
+- retained-uGUI roster/bulletin panel with visible close/reset controls, Suite-style drag, retained resize grip, and scrolling;
 - read-only detection of the player's native guild roster;
 - displays member names and, when the native tracking data exposes it, current zone and level;
 - records verified same-guild roster joins/leaves observed during the running session;
@@ -96,7 +96,7 @@ powershell -ExecutionPolicy Bypass -File .\BUILD_AND_INSTALL.ps1
 
 The script locates the current Erenshor install and the Lunaris developer reference, compiles, and installs only `ErenshorGuildLife.dll` to `<Erenshor>\plugins\`. Lunaris manages enable/disable and config; local bulletin state moves to `plugins\config\ErenshorGuildLife\`. Native Erenshor guild objects are discovered through reflection at runtime, unchanged. A legacy BepInEx release remains available in this repository's Git history.
 
-**Status:** this native build compiles cleanly against the installed Lunaris/Assembly-CSharp and passes its deterministic test suite. It has not yet been live-tested in-game under Lunaris (enable/disable/reload behavior). Do not assume hot-reload safety until that pass is done.
+**Status:** the pre-uGUI native baseline compiled and passed its deterministic tests. The retained-uGUI candidate in this handoff is source-verified but could not be recompiled here because the handoff omitted native Erenshor/Lunaris reference DLLs. Live enable/disable/reload verification is still required.
 
 ## Testing
 
@@ -111,3 +111,18 @@ Then follow `TESTING.md`.
 This project has been developed heavily with AI-assisted coding tools. The goal is to build features I wanted to use in Erenshor, with development guided through design, testing, playtesting, audits, and iteration against the game. Bug reports, code review, corrections, and contributions from experienced Erenshor modders are welcome.
 
 This is an unofficial, community-made mod for Erenshor and is not affiliated with or endorsed by the game's developer.
+
+
+## Optional Suite Hub integration
+
+Erenshor Suite Hub is **optional**. When it is installed, this mod can expose its normal player-facing controls there through the versioned public `GuildLifeControlApi` surface. The mod remains independently usable without Suite Hub and does not compile against Hub types or assume Hub load order.
+
+Guild Life remains a read-only native-guild companion with its own roster/bulletin panel. A compact standalone launcher is a fallback and is hidden by default while Suite Hub is loaded.
+
+Hub can show verified guild/roster/bulletin summaries and open or close Guild Life. It does not invite, kick, rank, recruit, or start native guild activities.
+
+The shared control/API and fully-in-world UI policy in this handoff are source-validated but **not yet live-tested under Lunaris hot reload**.
+
+### Content/UI migration candidate
+
+The current source migrates Guild Life to retained Unity uGUI without changing its authority boundary: native guild state is still read-only and no invite/kick/rank/recruit/quest/raid action is exposed. Hub controls are limited to launcher visibility, verified roster-change recording, bounded status, and Open/Close/Reset actions. Native compile and live Lunaris UI/reload verification remain required for this candidate.

@@ -27,16 +27,19 @@ namespace ErenshorGuildLife
     {
         public GuildLifeSettings() { }
 
-        [Config("LauncherX", "UI", "Saved Guild Life launcher X position.")]
+        [Config("LauncherX", "UI", "Saved Guild Life launcher horizontal position, normalized 0..1. Values outside that range recover to the safe default.")]
         public float LauncherX = -1f;
 
-        [Config("LauncherY", "UI", "Saved Guild Life launcher Y position.")]
+        [Config("LauncherY", "UI", "Saved Guild Life launcher vertical position, normalized 0..1. Values outside that range recover to the safe default.")]
         public float LauncherY = -1f;
 
-        [Config("WindowX", "UI", "Saved Guild Life window X position.")]
+        [Config("ShowStandaloneLauncherWithHub", "UI", "Show Guild Life launcher while a usable Suite Hub bridge is present. If Hub or this module bridge is unavailable, the standalone launcher is forced visible for recovery.")]
+        public bool ShowStandaloneLauncherWithHub = false;
+
+        [Config("WindowX", "UI", "Saved Guild Life window horizontal position, normalized 0..1. Values outside that range recover to the safe default.")]
         public float WindowX = -1f;
 
-        [Config("WindowY", "UI", "Saved Guild Life window Y position.")]
+        [Config("WindowY", "UI", "Saved Guild Life window vertical position, normalized 0..1. Values outside that range recover to the safe default.")]
         public float WindowY = -1f;
 
         [Config("WindowWidth", "UI", "Guild Life window width in pixels.")]

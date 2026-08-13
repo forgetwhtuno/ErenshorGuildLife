@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$GameDir = "",
     [string]$LunarisLibDir = ""
 )
@@ -66,14 +66,14 @@ New-Item -ItemType Directory -Force -Path $pluginRoot | Out-Null
 
 $refs = @(
     (Join-Path $LunarisLibDir "Lunaris.dll"),
-    (Join-Path $LunarisLibDir "0Harmony.dll"),
     (Join-Path $managed "Assembly-CSharp.dll"),
     (Join-Path $managed "netstandard.dll"),
     (Join-Path $managed "UnityEngine.dll"),
     (Join-Path $managed "UnityEngine.CoreModule.dll"),
-    (Join-Path $managed "UnityEngine.IMGUIModule.dll"),
+    (Join-Path $managed "UnityEngine.UIModule.dll"),
     (Join-Path $managed "UnityEngine.TextRenderingModule.dll"),
     (Join-Path $managed "UnityEngine.UI.dll"),
+    (Join-Path $managed "Unity.TextMeshPro.dll"),
     (Join-Path $managed "UnityEngine.InputLegacyModule.dll")
 )
 foreach ($ref in $refs) { if (-not (Test-Path $ref)) { throw "Missing reference: $ref" } }
@@ -107,3 +107,4 @@ finally {
 Write-Host "Installed Erenshor Guild Life to $out" -ForegroundColor Green
 Write-Host "Use the draggable GUILD LIFE UI button in game. No global hotkey is registered." -ForegroundColor Green
 Write-Host "Local Guild Life bulletin state is stored under plugins\config\ErenshorGuildLife." -ForegroundColor Green
+
