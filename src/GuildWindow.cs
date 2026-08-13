@@ -1,311 +1,328 @@
 using System;
+using System.Collections.Generic;
+using System.Text;
+using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace ErenshorGuildLife
 {
     internal sealed class GuildWindow
     {
-        private const int WindowId = 0x45524757;
-        private const float HeaderHeight = 31f;
-        private const int TabRoster = 0;
-        private const int TabBulletin = 1;
-
-        private GuildSnapshot _snapshot;
-        private GuildLifeDocument _document;
-        private Action _clearBulletin;
-        private bool _requestClose;
-        private int _tab;
-        private Vector2 _rosterScroll;
-        private Vector2 _bulletinScroll;
-        private Rect _currentRect;
-        private bool _resizing;
-        private Vector2 _resizeDelta;
-
-        private Texture2D _panelTexture;
-        private Texture2D _buttonTexture;
-        private Texture2D _buttonHoverTexture;
-        private Texture2D _selectedTexture;
-        private Texture2D _dangerTexture;
-        private GUIStyle _windowStyle;
-        private GUIStyle _titleStyle;
-        private GUIStyle _sectionStyle;
-        private GUIStyle _bodyStyle;
-        private GUIStyle _hintStyle;
-        private GUIStyle _buttonStyle;
-        private GUIStyle _selectedButtonStyle;
-        private GUIStyle _dangerButtonStyle;
-        private GUIStyle _closeButtonStyle;
-        private GUIStyle _resizeGripStyle;
-
-        internal bool RequestClose
+        private sealed class MemberRowUi
         {
-            get { return _requestClose; }
+            internal TextMeshProUGUI Level;
+            internal TextMeshProUGUI Zone;
         }
 
-        // Called on a verified character switch so scroll position and the selected tab from the
-        // outgoing character never carry over into the incoming character's window.
+        private const int TabRoster = 0;
+        private const int TabBulletin = 1;
+        private int _tab;
+
+        private GameObject _root;
+        private RectTransform _panel;
+        private RectTransform _rosterRoot;
+        private RectTransform _bulletinRoot;
+        private RectTransform _rosterContent;
+        private RectTransform _bulletinContent;
+        private TextMeshProUGUI _rosterHeading;
+        private TextMeshProUGUI _rosterHint;
+        private TextMeshProUGUI _bulletinHeading;
+        private Button _rosterTab;
+        private Button _bulletinTab;
+        private RetainedPosition _position;
+        private Action _clearBulletin;
+        private GuildSnapshot _snapshot;
+        private GuildLifeDocument _document;
+        private string _rosterSignature = string.Empty;
+        private readonly Dictionary<string, MemberRowUi> _memberRows =
+            new Dictionary<string, MemberRowUi>(StringComparer.OrdinalIgnoreCase);
+        private int _bulletinCount = -1;
+
+        internal void Initialize(float storedX, float storedY, float width, float height,
+            Action<float, float> persist, Action<float, float> persistSize, Action close, Action reset)
+        {
+            Dispose();
+            width = Mathf.Clamp(width, 520f, Mathf.Max(520f, Screen.width - 20f));
+            height = Mathf.Clamp(height, 360f, Mathf.Max(360f, Screen.height - 20f));
+            _root = RetainedUiKit.CreateCanvas("ErenshorGuildLifeCanvas", 522);
+            RectTransform canvas = _root.GetComponent<RectTransform>();
+            _panel = RetainedUiKit.CreateRect("GuildLifePanel", canvas);
+            RetainedUiKit.AnchorBottomLeft(_panel, 0f, 0f, width, height);
+            RetainedUiKit.AddImage(_panel, RetainedUiKit.Panel);
+            _panel.gameObject.AddComponent<CanvasGroup>();
+            BuildHeader(close, reset);
+            BuildTabs();
+            BuildRoster();
+            BuildBulletin();
+            _position = new RetainedPosition(storedX, storedY, 0.5f, 0.5f, persist);
+            _position.Resolve(_panel);
+            RetainedUiKit.AddResizeGrip("ResizeGrip", _panel, _panel, 16f, new Vector2(520f, 360f), persistSize);
+            _root.SetActive(false);
+        }
+
+        private void BuildHeader(Action close, Action reset)
+        {
+            RectTransform header = RetainedUiKit.CreateRect("Header", _panel);
+            RetainedUiKit.AnchorTopStretch(header, 0f, 0f, 0f, 32f);
+            RetainedUiKit.AddImage(header, RetainedUiKit.Header);
+            TextMeshProUGUI title = RetainedUiKit.AddLabel("Title", header, "ERENSHOR GUILD LIFE", 15f, FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
+            RetainedUiKit.Stretch(title.rectTransform, 10f, 0f, 72f, 0f);
+            AddHeaderButton(header, "Reset", "R", -38f, reset);
+            AddHeaderButton(header, "Close", "X", -6f, close);
+            RetainedUiKit.AddDragSurface("DragSurface", header, _panel, 72f,
+                delegate { if (_position != null) _position.DragCompleted(_panel); });
+        }
+
+        private void BuildTabs()
+        {
+            RectTransform row = RetainedUiKit.CreateRect("Tabs", _panel);
+            row.anchorMin = new Vector2(0f, 1f); row.anchorMax = new Vector2(1f, 1f); row.pivot = new Vector2(0.5f, 1f);
+            row.offsetMin = new Vector2(10f, -66f); row.offsetMax = new Vector2(-10f, -35f);
+            _rosterTab = AddAbsoluteButton(row, "Roster", "Roster", 0f, 92f, delegate { SetTab(TabRoster); });
+            _bulletinTab = AddAbsoluteButton(row, "Bulletin", "Bulletin", 98f, 92f, delegate { SetTab(TabBulletin); });
+        }
+
+        private void BuildRoster()
+        {
+            _rosterRoot = RetainedUiKit.CreateRect("RosterView", _panel);
+            _rosterRoot.anchorMin = Vector2.zero; _rosterRoot.anchorMax = Vector2.one;
+            _rosterRoot.offsetMin = new Vector2(10f, 10f); _rosterRoot.offsetMax = new Vector2(-10f, -70f);
+
+            _rosterHeading = RetainedUiKit.AddLabel("Heading", _rosterRoot, "", 13f, FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
+            _rosterHeading.rectTransform.anchorMin = new Vector2(0f, 1f); _rosterHeading.rectTransform.anchorMax = new Vector2(1f, 1f);
+            _rosterHeading.rectTransform.pivot = new Vector2(0.5f, 1f); _rosterHeading.rectTransform.offsetMin = new Vector2(0f, -28f); _rosterHeading.rectTransform.offsetMax = Vector2.zero;
+
+            _rosterHint = RetainedUiKit.AddLabel("Hint", _rosterRoot, "", 10f, FontStyles.Normal, TextAlignmentOptions.TopLeft);
+            _rosterHint.color = RetainedUiKit.Muted;
+            _rosterHint.rectTransform.anchorMin = new Vector2(0f, 1f); _rosterHint.rectTransform.anchorMax = new Vector2(1f, 1f);
+            _rosterHint.rectTransform.pivot = new Vector2(0.5f, 1f); _rosterHint.rectTransform.offsetMin = new Vector2(0f, -58f); _rosterHint.rectTransform.offsetMax = new Vector2(0f, -30f);
+
+            RectTransform viewport; RectTransform raw;
+            ScrollRect scroll = RetainedUiKit.AddScrollRect("RosterScroll", _rosterRoot, false, true, out viewport, out raw);
+            RectTransform sr = scroll.GetComponent<RectTransform>();
+            sr.anchorMin = Vector2.zero; sr.anchorMax = Vector2.one; sr.offsetMin = Vector2.zero; sr.offsetMax = new Vector2(0f, -62f);
+            _rosterContent = RetainedUiKit.AddVerticalContent("RosterRows", viewport, 3f, 2);
+            scroll.content = _rosterContent;
+        }
+
+        private void BuildBulletin()
+        {
+            _bulletinRoot = RetainedUiKit.CreateRect("BulletinView", _panel);
+            _bulletinRoot.anchorMin = Vector2.zero; _bulletinRoot.anchorMax = Vector2.one;
+            _bulletinRoot.offsetMin = new Vector2(10f, 10f); _bulletinRoot.offsetMax = new Vector2(-10f, -70f);
+
+            RectTransform top = RetainedUiKit.CreateRect("Top", _bulletinRoot);
+            RetainedUiKit.AnchorTopStretch(top, 0f, 0f, 0f, 30f);
+            _bulletinHeading = RetainedUiKit.AddLabel("Heading", top, "VERIFIED GUILD BULLETIN", 12f, FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
+            _bulletinHeading.rectTransform.anchorMin = Vector2.zero; _bulletinHeading.rectTransform.anchorMax = Vector2.one;
+            _bulletinHeading.rectTransform.offsetMin = Vector2.zero; _bulletinHeading.rectTransform.offsetMax = new Vector2(-64f, 0f);
+            Button clear = RetainedUiKit.AddButton("Clear", top, "Clear", delegate { if (_clearBulletin != null) _clearBulletin(); }, 58f, 24f, true);
+            RectTransform cr = clear.GetComponent<RectTransform>(); RemoveLayout(cr);
+            cr.anchorMin = cr.anchorMax = new Vector2(1f, 0.5f); cr.pivot = new Vector2(1f, 0.5f); cr.anchoredPosition = Vector2.zero; cr.sizeDelta = new Vector2(58f, 24f);
+
+            TextMeshProUGUI hint = RetainedUiKit.AddLabel("Hint", _bulletinRoot,
+                "Only native roster changes or events explicitly reported by another mod are recorded.", 10f, FontStyles.Normal, TextAlignmentOptions.TopLeft);
+            hint.color = RetainedUiKit.Muted;
+            hint.rectTransform.anchorMin = new Vector2(0f, 1f); hint.rectTransform.anchorMax = new Vector2(1f, 1f);
+            hint.rectTransform.pivot = new Vector2(0.5f, 1f); hint.rectTransform.offsetMin = new Vector2(0f, -58f); hint.rectTransform.offsetMax = new Vector2(0f, -32f);
+
+            RectTransform viewport; RectTransform raw;
+            ScrollRect scroll = RetainedUiKit.AddScrollRect("BulletinScroll", _bulletinRoot, false, true, out viewport, out raw);
+            RectTransform sr = scroll.GetComponent<RectTransform>();
+            sr.anchorMin = Vector2.zero; sr.anchorMax = Vector2.one; sr.offsetMin = Vector2.zero; sr.offsetMax = new Vector2(0f, -62f);
+            _bulletinContent = RetainedUiKit.AddVerticalContent("BulletinRows", viewport, 7f, 2);
+            scroll.content = _bulletinContent;
+        }
+
+        internal void Tick(bool visible, GuildSnapshot snapshot, GuildLifeDocument document, Action clearBulletin)
+        {
+            if (_root == null) return;
+            if (_root.activeSelf != visible) _root.SetActive(visible);
+            if (!visible) return;
+            if (_position != null) _position.Resolve(_panel);
+            _snapshot = snapshot; _document = document; _clearBulletin = clearBulletin;
+
+            string sig = BuildRosterSignature();
+            if (!string.Equals(sig, _rosterSignature, StringComparison.Ordinal))
+            {
+                _rosterSignature = sig;
+                RebuildRosterRows();
+            }
+            UpdateRosterDynamicValues();
+            int count = _document == null ? 0 : _document.Bulletin.Count;
+            if (count != _bulletinCount)
+            {
+                _bulletinCount = count;
+                RebuildBulletinRows();
+            }
+            UpdateTabAppearance();
+        }
+
         internal void ResetTransientState()
         {
             _tab = TabRoster;
-            _rosterScroll = Vector2.zero;
-            _bulletinScroll = Vector2.zero;
+            _rosterSignature = string.Empty;
+            _memberRows.Clear();
+            _bulletinCount = -1;
         }
 
-        internal Rect Draw(Rect rect, GuildSnapshot snapshot, GuildLifeDocument document, Action clearBulletin)
-        {
-            EnsureStyles();
-            _snapshot = snapshot;
-            _document = document;
-            _clearBulletin = clearBulletin;
-            _requestClose = false;
-            _currentRect = rect;
-            _resizeDelta = Vector2.zero;
-
-            int previousDepth = GUI.depth;
-            Rect result;
-            try
-            {
-                GUI.depth = -60;
-                result = GUI.Window(WindowId, rect, DrawContents, GUIContent.none, _windowStyle);
-            }
-            finally { GUI.depth = previousDepth; }
-
-            if (_resizeDelta != Vector2.zero)
-            {
-                result.width += _resizeDelta.x;
-                result.height += _resizeDelta.y;
-            }
-            return result;
-        }
+        internal void ResetPosition() { if (_position != null) _position.Reset(_panel); }
 
         internal void Dispose()
         {
-            Destroy(ref _panelTexture);
-            Destroy(ref _buttonTexture);
-            Destroy(ref _buttonHoverTexture);
-            Destroy(ref _selectedTexture);
-            Destroy(ref _dangerTexture);
-            _windowStyle = null;
-            _titleStyle = null;
-            _sectionStyle = null;
-            _bodyStyle = null;
-            _hintStyle = null;
-            _buttonStyle = null;
-            _selectedButtonStyle = null;
-            _dangerButtonStyle = null;
-            _closeButtonStyle = null;
-            _resizeGripStyle = null;
+            SuiteDragHandler.ForceReleaseIfOwned();
+            RetainedUiKit.DestroyRoot(ref _root);
+            _panel = null; _rosterRoot = null; _bulletinRoot = null; _rosterContent = null; _bulletinContent = null;
+            _position = null; _snapshot = null; _document = null; _clearBulletin = null;
+            _rosterSignature = string.Empty; _memberRows.Clear(); _bulletinCount = -1;
         }
 
-        private void DrawContents(int id)
+        private void SetTab(int tab)
         {
-            GUILayout.BeginVertical();
-            GUILayout.BeginHorizontal(GUILayout.Height(HeaderHeight));
-            GUILayout.Label("ERENSHOR GUILD LIFE", _titleStyle, GUILayout.ExpandWidth(true));
-            if (GUILayout.Button("X", _closeButtonStyle, GUILayout.Width(28f), GUILayout.Height(22f)))
-                _requestClose = true;
-            GUILayout.EndHorizontal();
-
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("Roster", _tab == TabRoster ? _selectedButtonStyle : _buttonStyle, GUILayout.Width(92f), GUILayout.Height(26f)))
-                _tab = TabRoster;
-            if (GUILayout.Button("Bulletin", _tab == TabBulletin ? _selectedButtonStyle : _buttonStyle, GUILayout.Width(92f), GUILayout.Height(26f)))
-                _tab = TabBulletin;
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
-            GUILayout.Space(4f);
-
-            if (_tab == TabRoster) DrawRoster();
-            else DrawBulletin();
-
-            GUILayout.EndVertical();
-            DrawResizeGrip();
-            GUI.DragWindow(new Rect(0f, 0f, Mathf.Max(0f, _currentRect.width - 42f), HeaderHeight));
+            _tab = tab == TabBulletin ? TabBulletin : TabRoster;
+            UpdateTabAppearance();
         }
 
-        private void DrawRoster()
+        private void UpdateTabAppearance()
         {
+            if (_rosterRoot != null) _rosterRoot.gameObject.SetActive(_tab == TabRoster);
+            if (_bulletinRoot != null) _bulletinRoot.gameObject.SetActive(_tab == TabBulletin);
+            SetSelected(_rosterTab, _tab == TabRoster);
+            SetSelected(_bulletinTab, _tab == TabBulletin);
+        }
+
+        private string BuildRosterSignature()
+        {
+            if (_snapshot == null) return "null";
+            StringBuilder sb = new StringBuilder();
+            sb.Append(_snapshot.RuntimeAvailable).Append('|').Append(_snapshot.InGuild).Append('|')
+              .Append(_snapshot.GuildId).Append('|').Append(_snapshot.GuildName).Append('|').Append(_snapshot.Diagnostic);
+            for (int i = 0; i < _snapshot.Members.Count; i++)
+            {
+                GuildMemberSnapshot m = _snapshot.Members[i];
+                if (m != null) sb.Append('|').Append(m.Name);
+            }
+            return sb.ToString();
+        }
+
+        private void RebuildRosterRows()
+        {
+            RetainedUiKit.ClearChildren(_rosterContent);
+            _memberRows.Clear();
             if (_snapshot == null || !_snapshot.RuntimeAvailable)
             {
-                GUILayout.Label("GUILD DATA UNAVAILABLE", _sectionStyle);
-                GUILayout.Label(_snapshot == null ? "No snapshot." : _snapshot.Diagnostic, _hintStyle);
+                _rosterHeading.text = "GUILD DATA UNAVAILABLE";
+                _rosterHint.text = _snapshot == null ? "No snapshot." : (_snapshot.Diagnostic ?? string.Empty);
+                LayoutRebuilder.ForceRebuildLayoutImmediate(_rosterContent);
                 return;
             }
-
             if (!_snapshot.InGuild)
             {
-                GUILayout.Label("NO VERIFIED PLAYER GUILD", _sectionStyle);
-                GUILayout.Label(_snapshot.Diagnostic, _hintStyle);
+                _rosterHeading.text = "NO VERIFIED PLAYER GUILD";
+                _rosterHint.text = _snapshot.Diagnostic ?? string.Empty;
+                LayoutRebuilder.ForceRebuildLayoutImmediate(_rosterContent);
                 return;
             }
+            _rosterHeading.text = (_snapshot.GuildName ?? string.Empty) + "  —  " + _snapshot.Members.Count.ToString() + " members";
+            _rosterHint.text = "Read-only native roster. Guild actions remain in Erenshor's Guild Manager.";
 
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(_snapshot.GuildName, _titleStyle, GUILayout.ExpandWidth(true));
-            GUILayout.Label(_snapshot.Members.Count.ToString() + " members", _hintStyle, GUILayout.Width(90f));
-            GUILayout.EndHorizontal();
-            GUILayout.Label("Read-only native roster. Guild actions remain in Erenshor's Guild Manager.", _hintStyle);
-            GUILayout.Space(4f);
-
-            _rosterScroll = GUILayout.BeginScrollView(_rosterScroll, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
             for (int i = 0; i < _snapshot.Members.Count; i++)
             {
                 GuildMemberSnapshot member = _snapshot.Members[i];
                 if (member == null) continue;
-                GUILayout.BeginHorizontal();
-                GUILayout.Label(member.Name, _bodyStyle, GUILayout.ExpandWidth(true));
+                RectTransform row = RetainedUiKit.AddHorizontalRow("Member", _rosterContent, 25f, 6f);
+                TextMeshProUGUI name = RetainedUiKit.AddLabel("Name", row, member.Name ?? string.Empty, 11f, FontStyles.Normal, TextAlignmentOptions.MidlineLeft);
+                LayoutElement nl = name.gameObject.AddComponent<LayoutElement>(); nl.flexibleWidth = 1f; nl.preferredHeight = 25f;
+                TextMeshProUGUI level = RetainedUiKit.AddLabel("Level", row, member.Level > 0 ? "Lv " + member.Level.ToString() : "", 10f, FontStyles.Normal, TextAlignmentOptions.MidlineRight);
+                LayoutElement ll = level.gameObject.AddComponent<LayoutElement>(); ll.preferredWidth = 52f; ll.preferredHeight = 25f;
+                TextMeshProUGUI zone = RetainedUiKit.AddLabel("Zone", row,
+                    string.IsNullOrWhiteSpace(member.Zone) ? "location unknown" : member.Zone, 10f, FontStyles.Normal, TextAlignmentOptions.MidlineRight);
+                zone.color = RetainedUiKit.Muted;
+                LayoutElement zl = zone.gameObject.AddComponent<LayoutElement>(); zl.preferredWidth = 170f; zl.preferredHeight = 25f;
+                if (!string.IsNullOrWhiteSpace(member.Name))
+                    _memberRows[member.Name] = new MemberRowUi { Level = level, Zone = zone };
+            }
+            LayoutRebuilder.ForceRebuildLayoutImmediate(_rosterContent);
+        }
+
+        private void UpdateRosterDynamicValues()
+        {
+            if (_snapshot == null || !_snapshot.RuntimeAvailable || !_snapshot.InGuild) return;
+            for (int i = 0; i < _snapshot.Members.Count; i++)
+            {
+                GuildMemberSnapshot member = _snapshot.Members[i];
+                if (member == null || string.IsNullOrWhiteSpace(member.Name)) continue;
+                MemberRowUi row;
+                if (!_memberRows.TryGetValue(member.Name, out row) || row == null) continue;
                 string level = member.Level > 0 ? "Lv " + member.Level.ToString() : string.Empty;
-                GUILayout.Label(level, _hintStyle, GUILayout.Width(48f));
-                GUILayout.Label(string.IsNullOrWhiteSpace(member.Zone) ? "location unknown" : member.Zone, _hintStyle, GUILayout.Width(160f));
-                GUILayout.EndHorizontal();
+                string zone = string.IsNullOrWhiteSpace(member.Zone) ? "location unknown" : member.Zone;
+                if (row.Level != null && !string.Equals(row.Level.text, level, StringComparison.Ordinal)) row.Level.text = level;
+                if (row.Zone != null && !string.Equals(row.Zone.text, zone, StringComparison.Ordinal)) row.Zone.text = zone;
             }
-            GUILayout.EndScrollView();
-            GUILayout.Label(_snapshot.Diagnostic, _hintStyle);
         }
 
-        private void DrawBulletin()
+        private void RebuildBulletinRows()
         {
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("VERIFIED GUILD BULLETIN", _sectionStyle, GUILayout.ExpandWidth(true));
+            RetainedUiKit.ClearChildren(_bulletinContent);
             int count = _document == null ? 0 : _document.Bulletin.Count;
-            GUILayout.Label(count.ToString() + " entries", _hintStyle, GUILayout.Width(70f));
-            if (count > 0 && GUILayout.Button("Clear", _dangerButtonStyle, GUILayout.Width(58f), GUILayout.Height(24f)))
+            _bulletinHeading.text = "VERIFIED GUILD BULLETIN  —  " + count.ToString() + " entries";
+            if (count == 0)
             {
-                if (_clearBulletin != null) _clearBulletin();
-            }
-            GUILayout.EndHorizontal();
-
-            GUILayout.Label("Only native roster changes or events explicitly reported by another mod are recorded.", _hintStyle);
-            GUILayout.Space(4f);
-
-            _bulletinScroll = GUILayout.BeginScrollView(_bulletinScroll, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
-            if (_document == null || _document.Bulletin.Count == 0)
-            {
-                GUILayout.Label("Nothing verified has happened in this bulletin yet.", _hintStyle);
-            }
-            else
-            {
-                for (int i = Math.Max(0, _document.Bulletin.Count - 200); i < _document.Bulletin.Count; i++)
-                {
-                    GuildBulletinEntry value = _document.Bulletin[i];
-                    DateTime local = value.TimestampUtc.Kind == DateTimeKind.Utc ? value.TimestampUtc.ToLocalTime() : value.TimestampUtc;
-                    string prefix = local.ToString("yyyy-MM-dd HH:mm");
-                    if (!string.IsNullOrWhiteSpace(value.Category)) prefix += " [" + value.Category + "]";
-                    if (!string.IsNullOrWhiteSpace(value.Actor)) prefix += " " + value.Actor;
-                    if (!string.IsNullOrWhiteSpace(value.Source)) prefix += " - " + value.Source;
-                    GUILayout.Label(prefix, _hintStyle);
-                    GUILayout.Label(value.Text, _bodyStyle);
-                    GUILayout.Space(6f);
-                }
-            }
-            GUILayout.EndScrollView();
-        }
-
-        private void DrawResizeGrip()
-        {
-            Rect grip = new Rect(Mathf.Max(0f, _currentRect.width - 22f), Mathf.Max(0f, _currentRect.height - 20f), 18f, 16f);
-            GUI.Label(grip, "//", _resizeGripStyle);
-            Event current = Event.current;
-            if (current == null) return;
-
-            if (!_resizing && current.type == EventType.MouseDown && current.button == 0 && grip.Contains(current.mousePosition))
-            {
-                _resizing = true;
-                current.Use();
+                AddBulletinLabel("Nothing verified has happened in this bulletin yet.", true);
+                LayoutRebuilder.ForceRebuildLayoutImmediate(_bulletinContent);
                 return;
             }
-
-            if (_resizing && current.type == EventType.MouseDrag && current.button == 0)
+            int start = Math.Max(0, count - 200);
+            for (int i = start; i < count; i++)
             {
-                _resizeDelta += current.delta;
-                current.Use();
-                return;
+                GuildBulletinEntry value = _document.Bulletin[i];
+                if (value == null) continue;
+                DateTime local = value.TimestampUtc.Kind == DateTimeKind.Utc ? value.TimestampUtc.ToLocalTime() : value.TimestampUtc;
+                string prefix = local.ToString("yyyy-MM-dd HH:mm");
+                if (!string.IsNullOrWhiteSpace(value.Category)) prefix += " [" + value.Category + "]";
+                if (!string.IsNullOrWhiteSpace(value.Actor)) prefix += " " + value.Actor;
+                if (!string.IsNullOrWhiteSpace(value.Source)) prefix += " - " + value.Source;
+                AddBulletinLabel(prefix + Environment.NewLine + (value.Text ?? string.Empty), false);
             }
-
-            if (_resizing && current.type == EventType.MouseUp && current.button == 0)
-            {
-                _resizing = false;
-                current.Use();
-            }
+            LayoutRebuilder.ForceRebuildLayoutImmediate(_bulletinContent);
         }
 
-        private void EnsureStyles()
+        private void AddBulletinLabel(string value, bool muted)
         {
-            if (_windowStyle != null) return;
-            Color cyan = new Color(0.03f, 0.67f, 0.86f, 0.95f);
-            Color soft = new Color(0.13f, 0.55f, 0.68f, 0.90f);
-            _panelTexture = Framed(new Color(0.015f, 0.09f, 0.125f, 0.92f), cyan);
-            _buttonTexture = Framed(new Color(0.035f, 0.17f, 0.22f, 0.90f), soft);
-            _buttonHoverTexture = Framed(new Color(0.12f, 0.38f, 0.48f, 0.95f), cyan);
-            _selectedTexture = Framed(new Color(0.08f, 0.30f, 0.36f, 0.96f), cyan);
-            _dangerTexture = Framed(new Color(0.19f, 0.15f, 0.09f, 0.90f), new Color(0.65f, 0.49f, 0.27f, 0.92f));
-
-            _windowStyle = new GUIStyle(GUI.skin.window);
-            _windowStyle.normal.background = _panelTexture;
-            _windowStyle.border = new RectOffset(1, 1, 1, 1);
-            _windowStyle.padding = new RectOffset(12, 12, 8, 10);
-
-            _titleStyle = new GUIStyle(GUI.skin.label);
-            _titleStyle.fontSize = 15;
-            _titleStyle.fontStyle = FontStyle.Bold;
-            _titleStyle.normal.textColor = new Color(0.56f, 0.88f, 1f, 1f);
-
-            _sectionStyle = new GUIStyle(GUI.skin.label);
-            _sectionStyle.fontSize = 11;
-            _sectionStyle.fontStyle = FontStyle.Bold;
-            _sectionStyle.normal.textColor = new Color(0.56f, 0.78f, 0.88f, 1f);
-
-            _bodyStyle = new GUIStyle(GUI.skin.label);
-            _bodyStyle.fontSize = 12;
-            _bodyStyle.wordWrap = true;
-            _bodyStyle.normal.textColor = new Color(0.92f, 0.94f, 0.92f, 1f);
-
-            _hintStyle = new GUIStyle(GUI.skin.label);
-            _hintStyle.fontSize = 10;
-            _hintStyle.wordWrap = true;
-            _hintStyle.normal.textColor = new Color(0.63f, 0.76f, 0.80f, 1f);
-
-            _buttonStyle = Button(_buttonTexture, _buttonHoverTexture, Color.white);
-            _selectedButtonStyle = Button(_selectedTexture, _buttonHoverTexture, new Color(0.88f, 1f, 0.98f, 1f));
-            _selectedButtonStyle.fontStyle = FontStyle.Bold;
-            _dangerButtonStyle = Button(_dangerTexture, _buttonHoverTexture, new Color(1f, 0.94f, 0.74f, 1f));
-            _closeButtonStyle = Button(_buttonTexture, _buttonHoverTexture, new Color(0.84f, 0.94f, 1f, 1f));
-
-            _resizeGripStyle = new GUIStyle(GUI.skin.label);
-            _resizeGripStyle.fontSize = 11;
-            _resizeGripStyle.alignment = TextAnchor.MiddleCenter;
-            _resizeGripStyle.normal.textColor = new Color(0.56f, 0.88f, 1f, 0.90f);
+            TextMeshProUGUI label = RetainedUiKit.AddLabel("Entry", _bulletinContent, value, 10.5f, FontStyles.Normal, TextAlignmentOptions.TopLeft);
+            if (muted) label.color = RetainedUiKit.Muted;
+            LayoutElement le = label.gameObject.AddComponent<LayoutElement>(); le.minHeight = 28f; le.preferredHeight = Mathf.Max(28f, label.preferredHeight + 7f);
         }
 
-        private static GUIStyle Button(Texture2D normal, Texture2D hover, Color text)
+        private static Button AddAbsoluteButton(RectTransform parent, string name, string label, float x, float width, Action action)
         {
-            GUIStyle style = new GUIStyle(GUI.skin.button);
-            style.normal.background = normal;
-            style.hover.background = hover;
-            style.active.background = hover;
-            style.normal.textColor = text;
-            style.hover.textColor = Color.white;
-            style.active.textColor = Color.white;
-            style.border = new RectOffset(1, 1, 1, 1);
-            return style;
+            Button b = RetainedUiKit.AddButton(name, parent, label, action, width, 26f, false);
+            RectTransform r = b.GetComponent<RectTransform>(); RemoveLayout(r);
+            r.anchorMin = r.anchorMax = new Vector2(0f, 0.5f); r.pivot = new Vector2(0f, 0.5f);
+            r.anchoredPosition = new Vector2(x, 0f); r.sizeDelta = new Vector2(width, 26f);
+            return b;
         }
 
-        private static Texture2D Framed(Color center, Color edge)
+        private static void AddHeaderButton(RectTransform header, string name, string label, float right, Action action)
         {
-            Texture2D texture = new Texture2D(3, 3, TextureFormat.RGBA32, false);
-            for (int y = 0; y < 3; y++)
-                for (int x = 0; x < 3; x++)
-                    texture.SetPixel(x, y, x == 0 || x == 2 || y == 0 || y == 2 ? edge : center);
-            texture.wrapMode = TextureWrapMode.Clamp;
-            texture.filterMode = FilterMode.Point;
-            texture.Apply(false, true);
-            return texture;
+            Button b = RetainedUiKit.AddButton(name, header, label, action, 28f, 24f, false);
+            RectTransform r = b.GetComponent<RectTransform>(); RemoveLayout(r);
+            r.anchorMin = r.anchorMax = new Vector2(1f, 0.5f); r.pivot = new Vector2(1f, 0.5f);
+            r.anchoredPosition = new Vector2(right, 0f); r.sizeDelta = new Vector2(28f, 24f);
         }
 
-        private static void Destroy(ref Texture2D texture)
+        private static void SetSelected(Button button, bool selected)
         {
-            if (texture == null) return;
-            UnityEngine.Object.Destroy(texture);
-            texture = null;
+            if (button == null) return;
+            Image image = button.GetComponent<Image>();
+            if (image != null) image.color = selected ? RetainedUiKit.Selected : RetainedUiKit.Button;
+        }
+
+        private static void RemoveLayout(RectTransform r)
+        {
+            LayoutElement le = r.GetComponent<LayoutElement>();
+            if (le != null) UnityEngine.Object.DestroyImmediate(le);
         }
     }
 }
