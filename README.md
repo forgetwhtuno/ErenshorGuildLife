@@ -6,7 +6,7 @@ A small read-only guild-presence and verified bulletin layer for Erenshor.
 
 The goal is not to replace Erenshor's Guild Manager. The goal is to make guild membership feel like something that exists **between** raid starts, invites, and roster management.
 
-## What 0.1.2 does
+## What 0.1.3 does
 
 - retained-uGUI `GUILD LIFE` launcher with Suite-style drag/fallback visibility; **no global hotkey**;
 - retained-uGUI roster/bulletin panel with the Suite dark/translucent/cyan frame, visible `▾`/`▸` collapse + reset/close controls, Suite-style drag, retained resize grip, and scrolling;
@@ -99,7 +99,7 @@ powershell -ExecutionPolicy Bypass -File .\BUILD_AND_INSTALL.ps1
 
 The script locates the current Erenshor install and the Lunaris developer reference, compiles, and installs only `ErenshorGuildLife.dll` to `<Erenshor>\plugins\`. Lunaris manages enable/disable and config; local bulletin state moves to `plugins\config\ErenshorGuildLife\`. Native Erenshor guild objects are discovered through reflection at runtime, unchanged. A legacy BepInEx release remains available in this repository's Git history.
 
-**Status:** 0.1.2 is the release-readiness source candidate. Deterministic coverage includes roster identity/diff rules, no-guild behavior, bulletin bounds/dedupe/persistence/recovery, character keys, legacy claim behavior, launcher geometry, and Suite launcher policy. A native compile and live Lunaris gameplay pass still require the current installed Erenshor/Lunaris reference DLLs.
+**Status:** 0.1.3 is the retained-UI visual candidate. Deterministic coverage includes roster identity/diff rules, no-guild behavior, bulletin bounds/dedupe/persistence/recovery, character keys, legacy claim behavior, launcher geometry, Suite launcher policy, collapse behavior, and player-ready/deferred-toggle handling. A fresh native compile, plugin-identity audit, and live Lunaris gameplay pass remain required.
 
 ## Testing
 
