@@ -1,5 +1,7 @@
 # Erenshor Guild Life 0.1.2 Release Candidate
 
+Part of the **Forgotten Roads for Erenshor** mod collection.
+
 A small read-only guild-presence and verified bulletin layer for Erenshor.
 
 The goal is not to replace Erenshor's Guild Manager. The goal is to make guild membership feel like something that exists **between** raid starts, invites, and roster management.
@@ -116,7 +118,7 @@ This is an unofficial, community-made mod for Erenshor and is not affiliated wit
 
 ## Optional Suite Hub integration
 
-Erenshor Suite Hub is **optional**. When it is installed, this mod can expose its normal player-facing controls there through the versioned public `GuildLifeControlApi` surface. The mod remains independently usable without Suite Hub and does not compile against Hub types or assume Hub load order.
+Forgotten Roads Hub is **optional**. When it is installed, this mod can expose its normal player-facing controls there through the versioned public `GuildLifeControlApi` surface. The mod remains independently usable without the Hub and does not compile against Hub types or assume Hub load order.
 
 Guild Life remains a read-only native-guild companion with its own roster/bulletin panel. A compact standalone launcher is the safety fallback. It hides only when Suite Hub reports Ready with `uiAvailable=true`, this module bridge is registered, and the per-mod **Show launcher** setting is OFF. Missing/unavailable Hub UI forces the launcher visible for recovery; the Hub's manual interaction-validation bit is diagnostic only.
 
