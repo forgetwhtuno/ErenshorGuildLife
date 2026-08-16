@@ -9,6 +9,9 @@ namespace ErenshorGuildLife
 {
     internal sealed class GuildWindow
     {
+        internal const int CanvasSortOrder = 522;
+        internal const float MinimumWidth = 440f;
+        internal const float MinimumHeight = 320f;
         private sealed class MemberRowUi
         {
             internal TextMeshProUGUI Level;
@@ -21,6 +24,11 @@ namespace ErenshorGuildLife
 
         private GameObject _root;
         private RectTransform _panel;
+        private RectTransform _bodyRoot;
+        private RectTransform _collapseChevron;
+        private GameObject _resizeGripRoot;
+        private bool _collapsed;
+        private float _expandedHeight;
         private RectTransform _rosterRoot;
         private RectTransform _bulletinRoot;
         private RectTransform _rosterContent;
@@ -30,6 +38,8 @@ namespace ErenshorGuildLife
         private TextMeshProUGUI _bulletinHeading;
         private Button _rosterTab;
         private Button _bulletinTab;
+        private Button _clearButton;
+        private TextMeshProUGUI _clearLabel;
         private RetainedPosition _position;
         private Action _clearBulletin;
         private GuildSnapshot _snapshot;
@@ -38,45 +48,66 @@ namespace ErenshorGuildLife
         private readonly Dictionary<string, MemberRowUi> _memberRows =
             new Dictionary<string, MemberRowUi>(StringComparer.OrdinalIgnoreCase);
         private int _bulletinCount = -1;
+        private float _clearArmedUntil;
 
         internal void Initialize(float storedX, float storedY, float width, float height,
             Action<float, float> persist, Action<float, float> persistSize, Action close, Action reset)
         {
             Dispose();
-            width = Mathf.Clamp(width, 520f, Mathf.Max(520f, Screen.width - 20f));
-            height = Mathf.Clamp(height, 360f, Mathf.Max(360f, Screen.height - 20f));
-            _root = RetainedUiKit.CreateCanvas("ErenshorGuildLifeCanvas", 522);
+            float maxWidth = Mathf.Max(1f, Screen.width - 20f);
+            float maxHeight = Mathf.Max(1f, Screen.height - 20f);
+            width = Mathf.Clamp(width, Mathf.Min(MinimumWidth, maxWidth), maxWidth);
+            height = Mathf.Clamp(height, Mathf.Min(MinimumHeight, maxHeight), maxHeight);
+            _root = RetainedUiKit.CreateCanvas("ErenshorGuildLifeCanvas", CanvasSortOrder);
             RectTransform canvas = _root.GetComponent<RectTransform>();
             _panel = RetainedUiKit.CreateRect("GuildLifePanel", canvas);
             RetainedUiKit.AnchorBottomLeft(_panel, 0f, 0f, width, height);
             RetainedUiKit.AddImage(_panel, RetainedUiKit.Panel);
             _panel.gameObject.AddComponent<CanvasGroup>();
+            _bodyRoot = RetainedUiKit.CreateRect("Body", _panel);
+            RetainedUiKit.Stretch(_bodyRoot, 0f, 0f, 0f, 0f);
+            _expandedHeight = height;
+            _collapsed = false;
             BuildHeader(close, reset);
             BuildTabs();
             BuildRoster();
             BuildBulletin();
             _position = new RetainedPosition(storedX, storedY, 0.5f, 0.5f, persist);
             _position.Resolve(_panel);
-            RetainedUiKit.AddResizeGrip("ResizeGrip", _panel, _panel, 16f, new Vector2(520f, 360f), persistSize);
+            SuiteResizeHandler resize = RetainedUiKit.AddResizeGrip("ResizeGrip", _panel, _panel, 16f, new Vector2(MinimumWidth, MinimumHeight),
+                delegate(float w, float h)
+                {
+                    _expandedHeight = Mathf.Max(MinimumHeight, h);
+                    if (persistSize != null) persistSize(w, h);
+                });
+            _resizeGripRoot = resize == null ? null : resize.gameObject;
+            RetainedUiKit.AddFrame(_panel, 1f);
+            UpdateCollapseVisual();
             _root.SetActive(false);
         }
 
         private void BuildHeader(Action close, Action reset)
         {
             RectTransform header = RetainedUiKit.CreateRect("Header", _panel);
-            RetainedUiKit.AnchorTopStretch(header, 0f, 0f, 0f, 32f);
+            RetainedUiKit.AnchorTopStretch(header, 0f, 0f, 0f, SuiteWindowChromePolicy.HeaderHeight);
             RetainedUiKit.AddImage(header, RetainedUiKit.Header);
+            AddCollapseButton(header);
             TextMeshProUGUI title = RetainedUiKit.AddLabel("Title", header, "ERENSHOR GUILD LIFE", 15f, FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
-            RetainedUiKit.Stretch(title.rectTransform, 10f, 0f, 72f, 0f);
+            RetainedUiKit.Stretch(title.rectTransform, 40f, 0f, 72f, 0f);
             AddHeaderButton(header, "Reset", "R", -38f, reset);
             AddHeaderButton(header, "Close", "X", -6f, close);
-            RetainedUiKit.AddDragSurface("DragSurface", header, _panel, 72f,
-                delegate { if (_position != null) _position.DragCompleted(_panel); });
+            RetainedUiKit.AddDragSurface("DragSurface", header, _panel, 36f, 72f,
+                delegate
+                {
+                    if (_position == null) return;
+                    if (_collapsed) _position.Clamp(_panel);
+                    else _position.DragCompleted(_panel);
+                });
         }
 
         private void BuildTabs()
         {
-            RectTransform row = RetainedUiKit.CreateRect("Tabs", _panel);
+            RectTransform row = RetainedUiKit.CreateRect("Tabs", _bodyRoot);
             row.anchorMin = new Vector2(0f, 1f); row.anchorMax = new Vector2(1f, 1f); row.pivot = new Vector2(0.5f, 1f);
             row.offsetMin = new Vector2(10f, -66f); row.offsetMax = new Vector2(-10f, -35f);
             _rosterTab = AddAbsoluteButton(row, "Roster", "Roster", 0f, 92f, delegate { SetTab(TabRoster); });
@@ -85,7 +116,7 @@ namespace ErenshorGuildLife
 
         private void BuildRoster()
         {
-            _rosterRoot = RetainedUiKit.CreateRect("RosterView", _panel);
+            _rosterRoot = RetainedUiKit.CreateRect("RosterView", _bodyRoot);
             _rosterRoot.anchorMin = Vector2.zero; _rosterRoot.anchorMax = Vector2.one;
             _rosterRoot.offsetMin = new Vector2(10f, 10f); _rosterRoot.offsetMax = new Vector2(-10f, -70f);
 
@@ -108,21 +139,22 @@ namespace ErenshorGuildLife
 
         private void BuildBulletin()
         {
-            _bulletinRoot = RetainedUiKit.CreateRect("BulletinView", _panel);
+            _bulletinRoot = RetainedUiKit.CreateRect("BulletinView", _bodyRoot);
             _bulletinRoot.anchorMin = Vector2.zero; _bulletinRoot.anchorMax = Vector2.one;
             _bulletinRoot.offsetMin = new Vector2(10f, 10f); _bulletinRoot.offsetMax = new Vector2(-10f, -70f);
 
             RectTransform top = RetainedUiKit.CreateRect("Top", _bulletinRoot);
             RetainedUiKit.AnchorTopStretch(top, 0f, 0f, 0f, 30f);
-            _bulletinHeading = RetainedUiKit.AddLabel("Heading", top, "VERIFIED GUILD BULLETIN", 12f, FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
+            _bulletinHeading = RetainedUiKit.AddLabel("Heading", top, "GUILD BULLETIN", 12f, FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
             _bulletinHeading.rectTransform.anchorMin = Vector2.zero; _bulletinHeading.rectTransform.anchorMax = Vector2.one;
             _bulletinHeading.rectTransform.offsetMin = Vector2.zero; _bulletinHeading.rectTransform.offsetMax = new Vector2(-64f, 0f);
-            Button clear = RetainedUiKit.AddButton("Clear", top, "Clear", delegate { if (_clearBulletin != null) _clearBulletin(); }, 58f, 24f, true);
-            RectTransform cr = clear.GetComponent<RectTransform>(); RemoveLayout(cr);
+            _clearButton = RetainedUiKit.AddButton("Clear", top, "Clear", ClearBulletin, 58f, 24f, true);
+            _clearLabel = _clearButton.GetComponentInChildren<TextMeshProUGUI>();
+            RectTransform cr = _clearButton.GetComponent<RectTransform>(); RemoveLayout(cr);
             cr.anchorMin = cr.anchorMax = new Vector2(1f, 0.5f); cr.pivot = new Vector2(1f, 0.5f); cr.anchoredPosition = Vector2.zero; cr.sizeDelta = new Vector2(58f, 24f);
 
             TextMeshProUGUI hint = RetainedUiKit.AddLabel("Hint", _bulletinRoot,
-                "Only native roster changes or events explicitly reported by another mod are recorded.", 10f, FontStyles.Normal, TextAlignmentOptions.TopLeft);
+                "Confirmed roster changes and events shared by compatible mods appear here.", 10f, FontStyles.Normal, TextAlignmentOptions.TopLeft);
             hint.color = RetainedUiKit.Muted;
             hint.rectTransform.anchorMin = new Vector2(0f, 1f); hint.rectTransform.anchorMax = new Vector2(1f, 1f);
             hint.rectTransform.pivot = new Vector2(0.5f, 1f); hint.rectTransform.offsetMin = new Vector2(0f, -58f); hint.rectTransform.offsetMax = new Vector2(0f, -32f);
@@ -140,11 +172,21 @@ namespace ErenshorGuildLife
             if (_root == null) return;
             if (_root.activeSelf != visible) _root.SetActive(visible);
             if (!visible) return;
-            if (_position != null) _position.Resolve(_panel);
+            bool fitted = RetainedUiKit.FitToScreen(_panel, 10f);
+            if (_position != null)
+            {
+                if (_collapsed) _position.Clamp(_panel);
+                else
+                {
+                    _position.Resolve(_panel);
+                    if (fitted) _position.Clamp(_panel);
+                }
+            }
             _snapshot = snapshot; _document = document; _clearBulletin = clearBulletin;
+            if (_collapsed) return;
 
             string sig = BuildRosterSignature();
-            if (!string.Equals(sig, _rosterSignature, StringComparison.Ordinal))
+            if (SuiteWindowChromePolicy.ShouldRebuildStructure(_rosterSignature, sig))
             {
                 _rosterSignature = sig;
                 RebuildRosterRows();
@@ -156,6 +198,10 @@ namespace ErenshorGuildLife
                 _bulletinCount = count;
                 RebuildBulletinRows();
             }
+            bool canClear = count > 0;
+            if (_clearButton != null) _clearButton.interactable = canClear;
+            if (!canClear) _clearArmedUntil = 0f;
+            if (_clearLabel != null) _clearLabel.text = Time.unscaledTime < _clearArmedUntil ? "Confirm" : "Clear";
             UpdateTabAppearance();
         }
 
@@ -165,6 +211,7 @@ namespace ErenshorGuildLife
             _rosterSignature = string.Empty;
             _memberRows.Clear();
             _bulletinCount = -1;
+            _clearArmedUntil = 0f;
         }
 
         internal void ResetPosition() { if (_position != null) _position.Reset(_panel); }
@@ -173,14 +220,19 @@ namespace ErenshorGuildLife
         {
             SuiteDragHandler.ForceReleaseIfOwned();
             RetainedUiKit.DestroyRoot(ref _root);
-            _panel = null; _rosterRoot = null; _bulletinRoot = null; _rosterContent = null; _bulletinContent = null;
+            _panel = null; _bodyRoot = null; _collapseChevron = null; _resizeGripRoot = null;
+            _collapsed = false; _expandedHeight = 0f;
+            _rosterRoot = null; _bulletinRoot = null; _rosterContent = null; _bulletinContent = null;
             _position = null; _snapshot = null; _document = null; _clearBulletin = null;
-            _rosterSignature = string.Empty; _memberRows.Clear(); _bulletinCount = -1;
+            _clearButton = null; _clearLabel = null;
+            _rosterSignature = string.Empty; _memberRows.Clear(); _bulletinCount = -1; _clearArmedUntil = 0f;
         }
 
         private void SetTab(int tab)
         {
-            _tab = tab == TabBulletin ? TabBulletin : TabRoster;
+            int next = tab == TabBulletin ? TabBulletin : TabRoster;
+            if (next != _tab) _clearArmedUntil = 0f;
+            _tab = next;
             UpdateTabAppearance();
         }
 
@@ -197,7 +249,7 @@ namespace ErenshorGuildLife
             if (_snapshot == null) return "null";
             StringBuilder sb = new StringBuilder();
             sb.Append(_snapshot.RuntimeAvailable).Append('|').Append(_snapshot.InGuild).Append('|')
-              .Append(_snapshot.GuildId).Append('|').Append(_snapshot.GuildName).Append('|').Append(_snapshot.Diagnostic);
+              .Append(_snapshot.GuildId).Append('|').Append(_snapshot.GuildName);
             for (int i = 0; i < _snapshot.Members.Count; i++)
             {
                 GuildMemberSnapshot m = _snapshot.Members[i];
@@ -212,20 +264,21 @@ namespace ErenshorGuildLife
             _memberRows.Clear();
             if (_snapshot == null || !_snapshot.RuntimeAvailable)
             {
-                _rosterHeading.text = "GUILD DATA UNAVAILABLE";
-                _rosterHint.text = _snapshot == null ? "No snapshot." : (_snapshot.Diagnostic ?? string.Empty);
+                _rosterHeading.text = "GUILD ROSTER UNAVAILABLE";
+                _rosterHint.text = "Guild information is not available right now. It will refresh automatically.";
                 LayoutRebuilder.ForceRebuildLayoutImmediate(_rosterContent);
                 return;
             }
             if (!_snapshot.InGuild)
             {
-                _rosterHeading.text = "NO VERIFIED PLAYER GUILD";
-                _rosterHint.text = _snapshot.Diagnostic ?? string.Empty;
+                _rosterHeading.text = "NO GUILD FOUND";
+                _rosterHint.text = "This character is not currently shown in a guild roster.";
                 LayoutRebuilder.ForceRebuildLayoutImmediate(_rosterContent);
                 return;
             }
-            _rosterHeading.text = (_snapshot.GuildName ?? string.Empty) + "  —  " + _snapshot.Members.Count.ToString() + " members";
-            _rosterHint.text = "Read-only native roster. Guild actions remain in Erenshor's Guild Manager.";
+            string guildName = string.IsNullOrWhiteSpace(_snapshot.GuildName) ? "GUILD ROSTER" : _snapshot.GuildName;
+            _rosterHeading.text = guildName + "  —  " + _snapshot.Members.Count.ToString() + " members";
+            _rosterHint.text = "Guild roster is view-only here. Use Erenshor's Guild Manager for guild actions.";
 
             for (int i = 0; i < _snapshot.Members.Count; i++)
             {
@@ -266,10 +319,10 @@ namespace ErenshorGuildLife
         {
             RetainedUiKit.ClearChildren(_bulletinContent);
             int count = _document == null ? 0 : _document.Bulletin.Count;
-            _bulletinHeading.text = "VERIFIED GUILD BULLETIN  —  " + count.ToString() + " entries";
+            _bulletinHeading.text = "GUILD BULLETIN  —  " + count.ToString() + " entries";
             if (count == 0)
             {
-                AddBulletinLabel("Nothing verified has happened in this bulletin yet.", true);
+                AddBulletinLabel("No guild news has been recorded yet.", true);
                 LayoutRebuilder.ForceRebuildLayoutImmediate(_bulletinContent);
                 return;
             }
@@ -288,6 +341,18 @@ namespace ErenshorGuildLife
             LayoutRebuilder.ForceRebuildLayoutImmediate(_bulletinContent);
         }
 
+        private void ClearBulletin()
+        {
+            if (_document == null || _document.Bulletin.Count == 0 || _clearBulletin == null) return;
+            if (Time.unscaledTime >= _clearArmedUntil)
+            {
+                _clearArmedUntil = Time.unscaledTime + 4f;
+                return;
+            }
+            _clearArmedUntil = 0f;
+            _clearBulletin();
+        }
+
         private void AddBulletinLabel(string value, bool muted)
         {
             TextMeshProUGUI label = RetainedUiKit.AddLabel("Entry", _bulletinContent, value, 10.5f, FontStyles.Normal, TextAlignmentOptions.TopLeft);
@@ -302,6 +367,59 @@ namespace ErenshorGuildLife
             r.anchorMin = r.anchorMax = new Vector2(0f, 0.5f); r.pivot = new Vector2(0f, 0.5f);
             r.anchoredPosition = new Vector2(x, 0f); r.sizeDelta = new Vector2(width, 26f);
             return b;
+        }
+
+        private void AddCollapseButton(RectTransform header)
+        {
+            Button button = RetainedUiKit.AddButton("Collapse", header, "", ToggleCollapsed, 28f, 24f, false);
+            RectTransform rect = button.GetComponent<RectTransform>();
+            RemoveLayout(rect);
+            rect.anchorMin = rect.anchorMax = new Vector2(0f, 0.5f);
+            rect.pivot = new Vector2(0f, 0.5f);
+            rect.anchoredPosition = new Vector2(4f, 0f);
+            rect.sizeDelta = new Vector2(28f, 24f);
+            _collapseChevron = button.GetComponent<RectTransform>();
+            RetainedUiKit.AddVerticalChevron(_collapseChevron, true);
+        }
+
+        private void ToggleCollapsed()
+        {
+            SetCollapsed(!_collapsed);
+        }
+
+        private void SetCollapsed(bool collapsed)
+        {
+            if (_panel == null || _collapsed == collapsed) return;
+            float oldHeight = _panel.rect.height;
+            if (collapsed && _expandedHeight < MinimumHeight) _expandedHeight = Mathf.Max(MinimumHeight, oldHeight);
+            _collapsed = collapsed;
+
+            float desired = SuiteWindowChromePolicy.ResolveDisplayHeight(_collapsed, _expandedHeight, MinimumHeight);
+            if (!_collapsed) desired = Mathf.Min(desired, Mathf.Max(SuiteWindowChromePolicy.CollapsedHeight, Screen.height - 20f));
+            _panel.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, desired);
+
+            Vector2 position = _panel.anchoredPosition;
+            position.y = SuiteWindowChromePolicy.PreserveTopBottomY(position.y, oldHeight, desired);
+            _panel.anchoredPosition = position;
+
+            if (_bodyRoot != null) _bodyRoot.gameObject.SetActive(!_collapsed);
+            if (_resizeGripRoot != null) _resizeGripRoot.SetActive(!_collapsed);
+            UpdateCollapseVisual();
+
+            if (_position != null)
+            {
+                _position.Clamp(_panel);
+                if (!_collapsed) _position.DragCompleted(_panel);
+            }
+        }
+
+        private void UpdateCollapseVisual()
+        {
+            if (_collapseChevron == null) return;
+            for (int i = _collapseChevron.childCount - 1; i >= 0; i--)
+                if (_collapseChevron.GetChild(i).name == "Chevron") UnityEngine.Object.Destroy(_collapseChevron.GetChild(i).gameObject);
+            // Expanded means click to collapse upward; collapsed means click to expand down.
+            RetainedUiKit.AddVerticalChevron(_collapseChevron, !_collapsed);
         }
 
         private static void AddHeaderButton(RectTransform header, string name, string label, float right, Action action)

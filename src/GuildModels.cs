@@ -38,6 +38,7 @@ namespace ErenshorGuildLife
     internal sealed class PendingGuildEvent
     {
         internal DateTime TimestampUtc;
+        internal string CharacterKey;
         internal string Source;
         internal string Category;
         internal string Actor;

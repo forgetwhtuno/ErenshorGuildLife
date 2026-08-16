@@ -47,10 +47,11 @@ namespace ErenshorGuildLife
         public static string GetStatus()
         {
             GuildLifeControlState s = GetBasicState();
-            if (!s.GameplayReady) return "Not fully in world.";
-            if (!s.RuntimeAvailable) return "Native guild data unavailable.";
-            if (!s.InGuild) return "No verified player guild.";
-            return s.GuildName + ": " + s.MemberCount + " member(s), " + s.BulletinCount + " bulletin entr" + (s.BulletinCount == 1 ? "y" : "ies") + ".";
+            if (!s.GameplayReady) return "Waiting for character.";
+            if (!s.RuntimeAvailable) return "Guild information unavailable.";
+            if (!s.InGuild) return "No guild found for this character.";
+            string name = string.IsNullOrWhiteSpace(s.GuildName) ? "Guild roster" : s.GuildName;
+            return name + ": " + s.MemberCount + " member(s), " + s.BulletinCount + " bulletin entr" + (s.BulletinCount == 1 ? "y" : "ies") + ".";
         }
 
         public static bool GetShowLauncher()

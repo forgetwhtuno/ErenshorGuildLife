@@ -14,9 +14,10 @@ namespace ErenshorGuildLife
     {
         internal const string PluginGuid = "forgetwhtuno.erenshor.guildlife";
         internal const string PluginName = "Erenshor Guild Life";
-        internal const string PluginVersion = "0.1.1";
+        internal const string PluginVersion = "0.1.2";
 
         internal static ErenshorGuildLifePlugin Instance;
+        private bool _initialized;
         private GuildLifeSuiteAuraProvider _auraProvider;
 
         private GuildLifeSettings _settings;
@@ -36,6 +37,7 @@ namespace ErenshorGuildLife
         private GuildWindow _window;
         private GuildSnapshot _snapshot;
         private bool _open;
+        private double _panelActivatedAt;
         private bool _pendingToggle;
         private bool _pendingClose;
         private bool _pendingOpen;
@@ -55,10 +57,18 @@ namespace ErenshorGuildLife
 
         private void Awake()
         {
+            if (Instance != null && Instance != this)
+            {
+                try { Logging.LogWarning("Erenshor Guild Life duplicate plugin instance ignored."); } catch { }
+                enabled = false;
+                return;
+            }
             Instance = this;
+            _initialized = true;
             _settings = new GuildLifeSettings();
             Config.Register(ref _settings);
             InitializeConfigEntries();
+            SuiteUiPolicy.InitializeHubPresence(this);
 
             _dataRoot = Path.Combine(Path.Combine(AppContext.BaseDirectory, "plugins", "config"), "ErenshorGuildLife");
             _legacyBulletinPath = Path.Combine(_dataRoot, "bulletin.dat");
@@ -72,7 +82,7 @@ namespace ErenshorGuildLife
             // Deliberately no bulletin load and no native guild read here: at Awake there is no
             // verified player character yet. Both happen once IsLocalCharacterReady() is true.
             try { _auraProvider = new GuildLifeSuiteAuraProvider(this); }
-            catch (Exception ex) { try { Logging.LogInfo("Guild Life Aura provider init failed: " + ex.Message); } catch { } }
+            catch (Exception ex) { try { Logging.LogInfo("Guild Life Aura provider init failed (" + ex.GetType().Name + ")."); } catch { } }
 
             Logging.LogInfo(
                 "Erenshor Guild Life " + PluginVersion +
@@ -90,9 +100,9 @@ namespace ErenshorGuildLife
             try
             {
                 string name = GameData.PlayerControl.Myself.MyStats.MyName;
-                return string.IsNullOrWhiteSpace(name) ? "Player" : name.Trim();
+                return string.IsNullOrWhiteSpace(name) ? string.Empty : name.Trim();
             }
-            catch { return "Player"; }
+            catch { return string.Empty; }
         }
 
         private static int ResolveSlotIndex()
@@ -110,12 +120,19 @@ namespace ErenshorGuildLife
 
         private static string ResolveCharacterKey()
         {
-            return GuildLifeCore.ComposeCharacterKey(PlayerName(), ResolveSlotIndex());
+            string name = PlayerName();
+            if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+            return GuildLifeCore.ComposeCharacterKey(name, ResolveSlotIndex());
         }
 
         private void EnsureCharacter()
         {
             string key = ResolveCharacterKey();
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                if (_characterKey.Length > 0) UnloadCharacter();
+                return;
+            }
             if (string.Equals(key, _characterKey, StringComparison.Ordinal)) return;
 
             if (_characterKey.Length > 0)
@@ -128,9 +145,10 @@ namespace ErenshorGuildLife
             _document = null;
             _characterKey = key;
             LoadCharacterBulletin(key);
+            _currentScene = CurrentSceneName();
             RefreshGuild(true);
             if (_window != null) _window.ResetTransientState();
-            Logging.LogInfo("Erenshor Guild Life character ready. key=" + key);
+            Logging.LogInfo("Erenshor Guild Life character context is ready.");
         }
 
         private void LoadCharacterBulletin(string key)
@@ -138,13 +156,13 @@ namespace ErenshorGuildLife
             string targetPath = Path.Combine(Path.Combine(Path.Combine(_dataRoot, "Characters"), key), "bulletin.dat");
 
             if (LegacyBulletinClaim.TryClaim(_legacyBulletinPath, _legacyClaimMarkerPath, targetPath))
-                Logging.LogInfo("Erenshor Guild Life legacy bulletin claimed by character. key=" + key);
+                Logging.LogInfo("Erenshor Guild Life legacy bulletin was imported for the active character.");
 
             _store = new GuildStore(targetPath);
             string warning;
             _document = _store.Load(out warning);
             if (!string.IsNullOrEmpty(warning))
-                Logging.LogWarning("Erenshor Guild Life recovered from unreadable local data for " + key + ". " + warning);
+                Logging.LogWarning("Erenshor Guild Life recovered readable local bulletin data. " + warning);
             _dirty = false;
         }
 
@@ -155,11 +173,11 @@ namespace ErenshorGuildLife
             _snapshot = null;
             _document = null;
             _store = null;
-            string previousKey = _characterKey;
+            bool hadCharacter = _characterKey.Length > 0;
             _characterKey = "";
             if (_window != null) _window.ResetTransientState();
-            if (previousKey.Length > 0)
-                Logging.LogInfo("Erenshor Guild Life character unloaded; native guild snapshot cleared. key=" + previousKey);
+            if (hadCharacter)
+                Logging.LogInfo("Erenshor Guild Life character context was cleared.");
         }
 
         private void InitializeConfigEntries()
@@ -184,7 +202,7 @@ namespace ErenshorGuildLife
                 if (_pendingOpen)
                 {
                     _pendingOpen = false;
-                    if (ready && !_open) OpenWindow();
+                    if (ready) { if (_open) MarkPanelActivated(); else OpenWindow(); }
                 }
                 if (_pendingClose)
                 {
@@ -209,6 +227,7 @@ namespace ErenshorGuildLife
                     PendingGuildEvent pending;
                     while (GuildLifeApi.TryDequeue(out pending))
                     {
+                        if (pending == null || !string.Equals(pending.CharacterKey, _characterKey, StringComparison.Ordinal)) continue;
                         if (GuildLifeCore.AppendBulletin(_document, pending.TimestampUtc, pending.Source, pending.Category, pending.Actor, pending.Text))
                             MarkDirty();
                     }
@@ -237,16 +256,19 @@ namespace ErenshorGuildLife
             catch (Exception ex)
             {
                 SuiteDragHandler.ForceReleaseIfOwned();
-                Logging.LogError("Erenshor Guild Life update failed: " + ex);
+                Logging.LogError("Erenshor Guild Life update failed (" + ex.GetType().Name + ").");
             }
         }
 
         private void OnDestroy()
         {
+            if (!_initialized) return;
+            _initialized = false;
             try { if (_auraProvider != null) _auraProvider.Unregister(); } catch { }
             _auraProvider = null;
             try { SaveNow(); } catch { }
             try { SuiteDragHandler.ForceReleaseIfOwned(); } catch { }
+            try { GuildLifeApi.ClearPending(); } catch { }
             try { if (_window != null) _window.Dispose(); } catch { }
             try { if (_launcher != null) _launcher.Dispose(); } catch { }
             try { if (_open) RestoreCursor(); } catch { }
@@ -264,7 +286,7 @@ namespace ErenshorGuildLife
         {
             _nextRefresh = Time.unscaledTime + Mathf.Clamp(_refreshSeconds == null ? 5 : _refreshSeconds.Value, 2, 30);
             GuildSnapshot previous = _snapshot;
-            GuildSnapshot current = GuildReader.Read();
+            GuildSnapshot current = GuildReader.Read(PlayerName());
             _snapshot = current;
 
             if (initial || previous == null || _recordRosterChanges == null || !_recordRosterChanges.Value || _document == null) return;
@@ -273,13 +295,13 @@ namespace ErenshorGuildLife
             for (int i = 0; i < delta.Joined.Count; i++)
             {
                 if (GuildLifeCore.AppendBulletin(_document, DateTime.UtcNow, "Erenshor", "Roster", delta.Joined[i],
-                    delta.Joined[i] + " joined the verified guild roster."))
+                    delta.Joined[i] + " joined the guild roster."))
                     MarkDirty();
             }
             for (int i = 0; i < delta.Left.Count; i++)
             {
                 if (GuildLifeCore.AppendBulletin(_document, DateTime.UtcNow, "Erenshor", "Roster", delta.Left[i],
-                    delta.Left[i] + " left the verified guild roster."))
+                    delta.Left[i] + " left the guild roster."))
                     MarkDirty();
             }
         }
@@ -292,6 +314,7 @@ namespace ErenshorGuildLife
         }
 
         internal bool ControlPanelOpen { get { return _open; } }
+        internal double ControlPanelActivatedAt { get { return _panelActivatedAt; } }
         internal string ControlCharacterKey { get { return _characterKey ?? string.Empty; } }
         internal GuildSnapshot ControlSnapshot { get { return _snapshot; } }
         internal GuildLifeDocument ControlDocument { get { return _document; } }
@@ -343,8 +366,8 @@ namespace ErenshorGuildLife
         {
             if (_windowWidth == null || _windowHeight == null) return;
             if (float.IsNaN(width) || float.IsInfinity(width) || float.IsNaN(height) || float.IsInfinity(height)) return;
-            _windowWidth.Value = Mathf.Max(520f, width);
-            _windowHeight.Value = Mathf.Max(360f, height);
+            _windowWidth.Value = Mathf.Max(GuildWindow.MinimumWidth, width);
+            _windowHeight.Value = Mathf.Max(GuildWindow.MinimumHeight, height);
             try { Config.Save(); } catch { }
         }
 
@@ -364,8 +387,9 @@ namespace ErenshorGuildLife
 
         private void OpenWindow()
         {
-            if (_open) return;
+            if (_open) { MarkPanelActivated(); return; }
             _open = true;
+            MarkPanelActivated();
             _cursorVisibleBeforeOpen = Cursor.visible;
             _cursorLockBeforeOpen = Cursor.lockState;
             Cursor.visible = true;
@@ -375,9 +399,15 @@ namespace ErenshorGuildLife
         private void CloseWindow()
         {
             if (!_open) return;
+            SuiteDragHandler.ForceReleaseIfOwned();
             _open = false;
             SaveNow();
             RestoreCursor();
+        }
+
+        private void MarkPanelActivated()
+        {
+            _panelActivatedAt = Time.realtimeSinceStartup;
         }
 
         private void RestoreCursor()
@@ -405,8 +435,8 @@ namespace ErenshorGuildLife
             {
                 _dirty = true;
                 _saveAfter = Time.unscaledTime + 5f;
-                Logging.LogError("Erenshor Guild Life could not save local bulletin data: " +
-                                ex.GetType().Name + ": " + ex.Message);
+                Logging.LogError("Erenshor Guild Life could not save local bulletin data (" +
+                                ex.GetType().Name + ").");
             }
         }
 

@@ -10,19 +10,28 @@ namespace ErenshorGuildLife
     public static class GuildLifeApi
     {
         public const int ContractVersion = 1;
+        public static bool IsAvailable { get { return ErenshorGuildLifePlugin.Instance != null; } }
+
         private const int MaximumPendingEvents = 256;
         private static readonly Queue<PendingGuildEvent> Pending = new Queue<PendingGuildEvent>();
 
         public static bool PostVerifiedEvent(string source, string category, string actor, string text)
         {
-            if (string.IsNullOrWhiteSpace(text)) return false;
+            if (!IsAvailable) return false;
+            ErenshorGuildLifePlugin plugin = ErenshorGuildLifePlugin.Instance;
+            string characterKey = plugin == null ? string.Empty : plugin.ControlCharacterKey;
+            if (string.IsNullOrWhiteSpace(characterKey)) return false;
+
+            string cleanText = GuildLifeCore.Clean(text, 320);
+            if (cleanText.Length == 0) return false;
 
             PendingGuildEvent value = new PendingGuildEvent();
             value.TimestampUtc = DateTime.UtcNow;
-            value.Source = source == null ? string.Empty : source;
-            value.Category = category == null ? string.Empty : category;
-            value.Actor = actor == null ? string.Empty : actor;
-            value.Text = text;
+            value.CharacterKey = characterKey;
+            value.Source = GuildLifeCore.Clean(source, 64);
+            value.Category = GuildLifeCore.Clean(category, 64);
+            value.Actor = GuildLifeCore.Clean(actor, 96);
+            value.Text = cleanText;
 
             lock (Pending)
             {
@@ -44,6 +53,11 @@ namespace ErenshorGuildLife
                 value = Pending.Dequeue();
                 return true;
             }
+        }
+
+        internal static void ClearPending()
+        {
+            lock (Pending) Pending.Clear();
         }
     }
 }
