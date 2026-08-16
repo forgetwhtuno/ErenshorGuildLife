@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased - bounded Suite UI polish
+
+- Aligned Guild Life and its launcher with the canonical dark/translucent/cyan Sim Actions palette and added a thin cyan frame.
+- Added a consistent `▾` / `▸` header collapse control. Collapsed Guild Life keeps only the draggable 32px header plus Reset/Close; roster/bulletin content and resize grip are hidden.
+- Collapse/expand preserves the header's screen position and clamps both states without changing the read-only guild authority boundary.
+- Retained roster level/zone text continues to update existing TMP controls in place; collapse adds no ordinary dynamic-text rebuild.
+- Extended Unity-free Suite UI policy tests for compact geometry, collapse/expand heights, top-edge preservation, containment clamp, launcher fallback, and structural-vs-dynamic rebuild behavior.
+
+## 0.1.2 - playable-state / release-readiness
+
+- Kept native guild authority strictly read-only and removed player-facing reflection/diagnostic terminology from the retained roster panel.
+- Native guild data is considered available only after the actual Guilds collection resolves; missing/null guild managers now fail closed instead of looking like a proven no-guild state.
+- If any native guild object exposes no readable member collection, the snapshot now stays unavailable instead of incorrectly concluding that the active character has no guild.
+- Reject duplicate plugin initialization so an abnormal double-start cannot create duplicate retained UI or lifecycle ownership.
+- Guild membership matching now uses the plugin's verified active-character name rather than a scene GameObject-name fallback, and no synthetic guild name is invented.
+- Roster-change detection prefers native guild IDs when available, preventing same-name/different-guild snapshots from fabricating join/leave history.
+- Bound queued external bulletin events to the active character and bounded/sanitized payloads before enqueue.
+- Reworked bulletin persistence to replace the live file safely with `.bak` recovery instead of deleting it before moving the temp file; malformed individual records no longer discard readable history.
+- Added confirmation/disabled state for Bulletin Clear and screen fitting for small resolutions; normal minimum panel size is now 440x320.
+- Removed character keys, local paths, and exception-message detail from normal runtime logs.
+- Added deterministic tests for no-guild/different-guild boundaries, persistence/backup, malformed data, payload bounds, and empty character-key fallback.
+
+## Unreleased - Suite panel consistency
+
+- Kept the retained roster/bulletin panel and read-only native guild boundaries unchanged.
+- Hub Basic settings now contain only **Show Guild Life launcher**; roster recording/refresh information is under Advanced.
+- Added the shared `ui.state` + existing `closePanel` contract for centralized quick-close selection without adding an Escape handler.
+- Standalone launcher suppression consumes the Hub presence endpoint and fails safe to visible unless the Hub is Ready, reports `uiAvailable=true`, and this module bridge is registered; the manual interaction-validation bit is diagnostic only.
+
 ## Unreleased (native Lunaris migration)
 
 - Converted the plugin host from BepInEx (`BaseUnityPlugin`/`[BepInPlugin]`/`[BepInProcess]`) to

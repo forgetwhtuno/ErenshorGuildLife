@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using ErenshorGuildLife;
 
 internal static class GuildLifeCoreTests
@@ -12,11 +13,19 @@ internal static class GuildLifeCoreTests
         {
             TestRosterDiff();
             TestGuildChangeDoesNotFakeDelta();
+            TestSameNameDifferentGuildIdsDoNotFakeDelta();
+            TestSameGuildIdAllowsRosterDiffWithoutName();
+            TestNoGuildDoesNotProduceRosterDelta();
             TestBulletinDuplicateSuppression();
             TestBulletinBound();
+            TestBulletinPayloadBound();
+            TestStoreRoundTripAndBackup();
+            TestStoreMalformedRecordPreservesReadableEntries();
+            TestStoreCorruptHeaderFallsBack();
             TestCharacterKeyWithSlot();
             TestCharacterKeyWithoutSlot();
             TestCharacterKeySanitizesUnsafeCharacters();
+            TestCharacterKeyFallsBackForEmptyInput();
             TestLegacyClaimImportsOnce();
             TestLegacyClaimSkippedWhenNoLegacyFile();
             TestLegacyClaimNeverOverwritesExistingCharacterData();
@@ -48,6 +57,13 @@ internal static class GuildLifeCoreTests
         string key = GuildLifeCore.SafeCharacterKey("We!rd Name-42");
         True(key.IndexOf('!') < 0 && key.IndexOf(' ') < 0 && key.IndexOf('-') < 0, "unsafe characters replaced");
         Equal("we_rd_name_42", key, "sanitized key");
+    }
+
+    private static void TestCharacterKeyFallsBackForEmptyInput()
+    {
+        Equal("player", GuildLifeCore.SafeCharacterKey(string.Empty), "empty character key fallback");
+        Equal("player", GuildLifeCore.SafeCharacterKey("   "), "whitespace character key fallback");
+        Equal("player", GuildLifeCore.SafeCharacterKey(null), "null character key fallback");
     }
 
     private static void TestLegacyClaimImportsOnce()
@@ -106,9 +122,6 @@ internal static class GuildLifeCoreTests
         finally { TryDelete(root); }
     }
 
-    // Guards against the launcher regressing to a full-width DragWindow rect sitting on top of the
-    // button rect (the confirmed root cause of "click doesn't visibly open" / "can't be dragged").
-    // A click landing inside both rects at once is ambiguous to Unity's IMGUI event handling.
     private static void TestLauncherDragAndButtonRectsDoNotOverlap()
     {
         PureRect drag = LauncherLayout.DragRect();
@@ -120,15 +133,10 @@ internal static class GuildLifeCoreTests
         True(button.X + button.Width <= LauncherLayout.Width, "button rect stays within launcher width");
     }
 
-    private static void TryDelete(string root)
-    {
-        try { if (Directory.Exists(root)) Directory.Delete(root, true); } catch { }
-    }
-
     private static void TestRosterDiff()
     {
-        GuildSnapshot a = Guild("Test", "A", "B");
-        GuildSnapshot b = Guild("Test", "B", "C");
+        GuildSnapshot a = Guild("Test", 12, "A", "B");
+        GuildSnapshot b = Guild("Test", 12, "B", "C");
         GuildRosterDelta delta = GuildLifeCore.DiffRosters(a, b);
         Equal(1, delta.Joined.Count, "one joined");
         Equal("C", delta.Joined[0], "C joined");
@@ -138,9 +146,35 @@ internal static class GuildLifeCoreTests
 
     private static void TestGuildChangeDoesNotFakeDelta()
     {
-        GuildRosterDelta delta = GuildLifeCore.DiffRosters(Guild("One", "A"), Guild("Two", "B"));
+        GuildRosterDelta delta = GuildLifeCore.DiffRosters(Guild("One", 1, "A"), Guild("Two", 2, "B"));
         Equal(0, delta.Joined.Count, "guild switch no join inference");
         Equal(0, delta.Left.Count, "guild switch no leave inference");
+    }
+
+    private static void TestSameNameDifferentGuildIdsDoNotFakeDelta()
+    {
+        GuildRosterDelta delta = GuildLifeCore.DiffRosters(Guild("Knights", 10, "A"), Guild("Knights", 11, "B"));
+        Equal(0, delta.Joined.Count, "different authoritative guild ids block join inference");
+        Equal(0, delta.Left.Count, "different authoritative guild ids block leave inference");
+    }
+
+    private static void TestSameGuildIdAllowsRosterDiffWithoutName()
+    {
+        GuildSnapshot a = Guild(string.Empty, 21, "A");
+        GuildSnapshot b = Guild(string.Empty, 21, "A", "B");
+        GuildRosterDelta delta = GuildLifeCore.DiffRosters(a, b);
+        Equal(1, delta.Joined.Count, "same authoritative guild id allows roster diff");
+        Equal("B", delta.Joined[0], "new member mapped under same guild id");
+    }
+
+    private static void TestNoGuildDoesNotProduceRosterDelta()
+    {
+        GuildSnapshot none = new GuildSnapshot();
+        none.RuntimeAvailable = true;
+        none.InGuild = false;
+        GuildRosterDelta delta = GuildLifeCore.DiffRosters(Guild("Test", 5, "A"), none);
+        Equal(0, delta.Joined.Count, "no-guild state does not infer joins");
+        Equal(0, delta.Left.Count, "no-guild state does not infer departures");
     }
 
     private static void TestBulletinDuplicateSuppression()
@@ -162,12 +196,93 @@ internal static class GuildLifeCoreTests
         True(doc.Bulletin[0].Text.IndexOf("event 15", StringComparison.Ordinal) >= 0, "oldest trimmed");
     }
 
-    private static GuildSnapshot Guild(string name, params string[] members)
+    private static void TestBulletinPayloadBound()
+    {
+        GuildLifeDocument doc = new GuildLifeDocument();
+        True(GuildLifeCore.AppendBulletin(doc, DateTime.UtcNow, new string('s', 90), new string('c', 90), new string('a', 130), new string('x', 500) + "\0tail"), "bounded event accepted");
+        GuildBulletinEntry value = doc.Bulletin[0];
+        True(value.Source.Length <= 64, "source bounded");
+        True(value.Category.Length <= 64, "category bounded");
+        True(value.Actor.Length <= 96, "actor bounded");
+        True(value.Text.Length <= 320, "text bounded");
+        True(value.Text.IndexOf('\0') < 0, "NUL removed from bulletin text");
+    }
+
+    private static void TestStoreRoundTripAndBackup()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "GuildLifeTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            string path = Path.Combine(root, "bulletin.dat");
+            GuildStore store = new GuildStore(path);
+            GuildLifeDocument doc = new GuildLifeDocument();
+            GuildLifeCore.AppendBulletin(doc, DateTime.UtcNow, "Erenshor", "Roster", "A", "A joined.");
+            store.Save(doc);
+            GuildLifeCore.AppendBulletin(doc, DateTime.UtcNow.AddSeconds(20), "Erenshor", "Roster", "B", "B joined.");
+            store.Save(doc);
+
+            string warning;
+            GuildLifeDocument loaded = store.Load(out warning);
+            Equal(string.Empty, warning, "round trip warning");
+            Equal(2, loaded.Bulletin.Count, "round trip preserves bulletin");
+            True(File.Exists(path + ".bak"), "second save preserves backup");
+        }
+        finally { TryDelete(root); }
+    }
+
+    private static void TestStoreMalformedRecordPreservesReadableEntries()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "GuildLifeTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            string path = Path.Combine(root, "bulletin.dat");
+            string source = Convert.ToBase64String(Encoding.UTF8.GetBytes("Erenshor"));
+            string category = Convert.ToBase64String(Encoding.UTF8.GetBytes("Roster"));
+            string actor = Convert.ToBase64String(Encoding.UTF8.GetBytes("A"));
+            string text = Convert.ToBase64String(Encoding.UTF8.GetBytes("Readable event."));
+            File.WriteAllText(path,
+                "ERENSHOR_GUILD_LIFE_V1\n" +
+                "E|" + DateTime.UtcNow.Ticks.ToString() + "|" + source + "|" + category + "|" + actor + "|" + text + "\n" +
+                "E|bad-ticks|%%%|%%%|%%%|%%%\n", Encoding.UTF8);
+
+            GuildStore store = new GuildStore(path);
+            string warning;
+            GuildLifeDocument loaded = store.Load(out warning);
+            True(!string.IsNullOrEmpty(warning), "malformed record should report warning");
+            Equal(1, loaded.Bulletin.Count, "readable bulletin survives malformed neighbor");
+            Equal("Readable event.", loaded.Bulletin[0].Text, "readable text preserved");
+            Equal(0, Directory.GetFiles(root, "bulletin.dat.corrupt-*").Length, "single malformed record should not quarantine whole file");
+        }
+        finally { TryDelete(root); }
+    }
+
+    private static void TestStoreCorruptHeaderFallsBack()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "GuildLifeTests_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(root);
+            string path = Path.Combine(root, "bulletin.dat");
+            File.WriteAllText(path, "not guild data");
+            GuildStore store = new GuildStore(path);
+            string warning;
+            GuildLifeDocument loaded = store.Load(out warning);
+            True(!string.IsNullOrEmpty(warning), "invalid header reports warning");
+            Equal(0, loaded.Bulletin.Count, "invalid header falls back to empty bulletin");
+            Equal(1, Directory.GetFiles(root, "bulletin.dat.corrupt-*").Length, "invalid data preserved as corrupt backup");
+        }
+        finally { TryDelete(root); }
+    }
+
+    private static GuildSnapshot Guild(string name, int id, params string[] members)
     {
         GuildSnapshot value = new GuildSnapshot();
         value.RuntimeAvailable = true;
         value.InGuild = true;
         value.GuildName = name;
+        value.GuildId = id;
         for (int i = 0; i < members.Length; i++)
         {
             GuildMemberSnapshot member = new GuildMemberSnapshot();
@@ -175,6 +290,11 @@ internal static class GuildLifeCoreTests
             value.Members.Add(member);
         }
         return value;
+    }
+
+    private static void TryDelete(string root)
+    {
+        try { if (Directory.Exists(root)) Directory.Delete(root, true); } catch { }
     }
 
     private static void True(bool value, string label)

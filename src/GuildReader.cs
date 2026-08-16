@@ -12,7 +12,7 @@ namespace ErenshorGuildLife
         private static Type _guildManagerType;
         private static bool _typesResolved;
 
-        internal static GuildSnapshot Read()
+        internal static GuildSnapshot Read(string verifiedPlayerName)
         {
             ResolveTypes();
             GuildSnapshot result = new GuildSnapshot();
@@ -22,8 +22,12 @@ namespace ErenshorGuildLife
                 return result;
             }
 
-            result.RuntimeAvailable = true;
-            result.PlayerName = ReadPlayerName();
+            result.PlayerName = string.IsNullOrWhiteSpace(verifiedPlayerName) ? string.Empty : verifiedPlayerName.Trim();
+            if (result.PlayerName.Length == 0)
+            {
+                result.Diagnostic = "The active character identity was not available.";
+                return result;
+            }
 
             object guildManager = ReadStaticMember(_gameDataType, new string[] { "GuildManager", "GuildMngr" });
             if (guildManager == null && _guildManagerType != null)
@@ -39,13 +43,20 @@ namespace ErenshorGuildLife
                 return result;
             }
 
+            result.RuntimeAvailable = true;
             Dictionary<string, TrackingInfo> tracking = ReadTracking();
-            object matchedGuild = null;
+            bool unreadableRosterSeen = false;
 
             foreach (object guild in guilds)
             {
                 if (guild == null) continue;
-                List<string> members = ReadMemberNames(guild);
+                bool rosterResolved;
+                List<string> members = ReadMemberNames(guild, out rosterResolved);
+                if (!rosterResolved)
+                {
+                    unreadableRosterSeen = true;
+                    continue;
+                }
                 if (members.Count == 0) continue;
 
                 bool playerMember = false;
@@ -60,10 +71,9 @@ namespace ErenshorGuildLife
                 }
                 if (!playerMember) continue;
 
-                matchedGuild = guild;
                 result.InGuild = true;
                 result.GuildId = ReadInt(guild, new string[] { "Id", "ID", "GuildID", "GuildId" }, 0);
-                result.GuildName = ReadString(guild, new string[] { "GuildName", "Name" }, "Guild");
+                result.GuildName = ReadString(guild, new string[] { "GuildName", "Name" }, string.Empty);
 
                 for (int i = 0; i < members.Count; i++)
                 {
@@ -88,9 +98,13 @@ namespace ErenshorGuildLife
 
             if (!result.InGuild)
             {
-                result.Diagnostic = string.IsNullOrWhiteSpace(result.PlayerName)
-                    ? "Player name was unavailable; guild membership could not be proven."
-                    : "The player was not found in a native guild roster.";
+                if (unreadableRosterSeen)
+                {
+                    result.RuntimeAvailable = false;
+                    result.Diagnostic = "One or more native guild rosters could not be read.";
+                    return result;
+                }
+                result.Diagnostic = "The active character was not found in a native guild roster.";
                 return result;
             }
 
@@ -121,22 +135,6 @@ namespace ErenshorGuildLife
             }
         }
 
-        private static string ReadPlayerName()
-        {
-            object slot = ReadStaticMember(_gameDataType, new string[] { "CurrentCharacterSlot", "ActiveSaveSlot" });
-            string name = ReadString(slot, new string[] { "CharName", "CharacterName", "Name" }, string.Empty);
-            if (!string.IsNullOrWhiteSpace(name)) return name;
-
-            object control = ReadStaticMember(_gameDataType, new string[] { "PlayerControl" });
-            Component component = control as Component;
-            if (component != null && component.gameObject != null)
-            {
-                string fallback = component.gameObject.name;
-                if (!string.IsNullOrWhiteSpace(fallback)) return fallback.Trim();
-            }
-            return string.Empty;
-        }
-
         private static Dictionary<string, TrackingInfo> ReadTracking()
         {
             Dictionary<string, TrackingInfo> result =
@@ -160,11 +158,14 @@ namespace ErenshorGuildLife
             return result;
         }
 
-        private static List<string> ReadMemberNames(object guild)
+        private static List<string> ReadMemberNames(object guild, out bool resolved)
         {
             List<string> result = new List<string>();
-            IEnumerable members = ReadMember(guild, new string[] { "GuildMembers", "Members", "MemberNames" }) as IEnumerable;
-            if (members == null) return result;
+            object rawMembers;
+            bool memberShapeFound = TryReadMember(guild, new string[] { "GuildMembers", "Members", "MemberNames" }, out rawMembers);
+            IEnumerable members = rawMembers as IEnumerable;
+            resolved = memberShapeFound && members != null;
+            if (!resolved) return result;
 
             foreach (object raw in members)
             {
@@ -184,14 +185,7 @@ namespace ErenshorGuildLife
             string reflected = ReadString(value,
                 new string[] { "SimName", "MemberName", "CharacterName", "Name" },
                 string.Empty);
-            if (!string.IsNullOrWhiteSpace(reflected)) return reflected.Trim();
-
-            try
-            {
-                string converted = Convert.ToString(value);
-                return string.IsNullOrWhiteSpace(converted) ? string.Empty : converted.Trim();
-            }
-            catch { return string.Empty; }
+            return string.IsNullOrWhiteSpace(reflected) ? string.Empty : reflected.Trim();
         }
 
         private static bool Contains(List<string> values, string value)
@@ -220,20 +214,35 @@ namespace ErenshorGuildLife
 
         private static object ReadMember(object target, string[] names)
         {
-            if (target == null || names == null) return null;
+            object value;
+            return TryReadMember(target, names, out value) ? value : null;
+        }
+
+        private static bool TryReadMember(object target, string[] names, out object value)
+        {
+            value = null;
+            if (target == null || names == null) return false;
             Type type = target.GetType();
             for (int i = 0; i < names.Length; i++)
             {
                 try
                 {
                     FieldInfo field = type.GetField(names[i], BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (field != null) return field.GetValue(target);
+                    if (field != null)
+                    {
+                        value = field.GetValue(target);
+                        return true;
+                    }
                     PropertyInfo property = type.GetProperty(names[i], BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (property != null && property.GetIndexParameters().Length == 0) return property.GetValue(target, null);
+                    if (property != null && property.GetIndexParameters().Length == 0)
+                    {
+                        value = property.GetValue(target, null);
+                        return true;
+                    }
                 }
                 catch { }
             }
-            return null;
+            return false;
         }
 
         private static string ReadString(object target, string[] names, string fallback)

@@ -1,19 +1,20 @@
-# Erenshor Guild Life 0.1.0 Preview
+# Erenshor Guild Life 0.1.2 Release Candidate
 
 A small read-only guild-presence and verified bulletin layer for Erenshor.
 
 The goal is not to replace Erenshor's Guild Manager. The goal is to make guild membership feel like something that exists **between** raid starts, invites, and roster management.
 
-## What 0.1.0 does
+## What 0.1.2 does
 
 - retained-uGUI `GUILD LIFE` launcher with Suite-style drag/fallback visibility; **no global hotkey**;
-- retained-uGUI roster/bulletin panel with visible close/reset controls, Suite-style drag, retained resize grip, and scrolling;
+- retained-uGUI roster/bulletin panel with the Suite dark/translucent/cyan frame, visible `▾`/`▸` collapse + reset/close controls, Suite-style drag, retained resize grip, and scrolling;
 - read-only detection of the player's native guild roster;
 - displays member names and, when the native tracking data exposes it, current zone and level;
 - records verified same-guild roster joins/leaves observed during the running session;
-- keeps a bounded local Guild Bulletin;
+- keeps a bounded local Guild Bulletin with duplicate suppression;
 - exposes `GuildLifeApi.PostVerifiedEvent(...)` so other mods can post facts they already verified;
-- local sidecar persistence under `plugins/config/ErenshorGuildLife/`.
+- binds queued external bulletin events to the active character so character switches cannot cross-contaminate local history;
+- local per-character sidecar persistence under `plugins/config/ErenshorGuildLife/Characters/<character-key>/` with backup and corrupt-data recovery.
 
 ## What it deliberately does not do
 
@@ -96,7 +97,7 @@ powershell -ExecutionPolicy Bypass -File .\BUILD_AND_INSTALL.ps1
 
 The script locates the current Erenshor install and the Lunaris developer reference, compiles, and installs only `ErenshorGuildLife.dll` to `<Erenshor>\plugins\`. Lunaris manages enable/disable and config; local bulletin state moves to `plugins\config\ErenshorGuildLife\`. Native Erenshor guild objects are discovered through reflection at runtime, unchanged. A legacy BepInEx release remains available in this repository's Git history.
 
-**Status:** the pre-uGUI native baseline compiled and passed its deterministic tests. The retained-uGUI candidate in this handoff is source-verified but could not be recompiled here because the handoff omitted native Erenshor/Lunaris reference DLLs. Live enable/disable/reload verification is still required.
+**Status:** 0.1.2 is the release-readiness source candidate. Deterministic coverage includes roster identity/diff rules, no-guild behavior, bulletin bounds/dedupe/persistence/recovery, character keys, legacy claim behavior, launcher geometry, and Suite launcher policy. A native compile and live Lunaris gameplay pass still require the current installed Erenshor/Lunaris reference DLLs.
 
 ## Testing
 
@@ -117,12 +118,12 @@ This is an unofficial, community-made mod for Erenshor and is not affiliated wit
 
 Erenshor Suite Hub is **optional**. When it is installed, this mod can expose its normal player-facing controls there through the versioned public `GuildLifeControlApi` surface. The mod remains independently usable without Suite Hub and does not compile against Hub types or assume Hub load order.
 
-Guild Life remains a read-only native-guild companion with its own roster/bulletin panel. A compact standalone launcher is a fallback and is hidden by default while Suite Hub is loaded.
+Guild Life remains a read-only native-guild companion with its own roster/bulletin panel. A compact standalone launcher is the safety fallback. It hides only when Suite Hub reports Ready with `uiAvailable=true`, this module bridge is registered, and the per-mod **Show launcher** setting is OFF. Missing/unavailable Hub UI forces the launcher visible for recovery; the Hub's manual interaction-validation bit is diagnostic only.
 
-Hub can show verified guild/roster/bulletin summaries and open or close Guild Life. It does not invite, kick, rank, recruit, or start native guild activities.
+Hub can show concise guild/roster/bulletin status and open or close Guild Life. It does not invite, kick, rank, recruit, or start native guild activities.
 
 The shared control/API and fully-in-world UI policy in this handoff are source-validated but **not yet live-tested under Lunaris hot reload**.
 
 ### Content/UI migration candidate
 
-The current source migrates Guild Life to retained Unity uGUI without changing its authority boundary: native guild state is still read-only and no invite/kick/rank/recruit/quest/raid action is exposed. Hub controls are limited to launcher visibility, verified roster-change recording, bounded status, and Open/Close/Reset actions. Native compile and live Lunaris UI/reload verification remain required for this candidate.
+Guild Life uses retained Unity uGUI without changing its authority boundary: native guild state is still read-only and no invite/kick/rank/recruit/quest/raid action is exposed. Hub controls are limited to **Show Guild Life Launcher**, roster-change recording, bounded status, and Open/Close/Reset actions. Native compile and live Lunaris UI/reload verification remain part of the release checklist.

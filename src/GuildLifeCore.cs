@@ -21,7 +21,9 @@ namespace ErenshorGuildLife
 
         internal static string SafeCharacterKey(string value)
         {
-            return new string((value ?? "player").ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '_').Take(48).ToArray());
+            string source = string.IsNullOrWhiteSpace(value) ? "player" : value.Trim();
+            string key = new string(source.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '_').Take(48).ToArray());
+            return key.Length == 0 ? "player" : key;
         }
 
         internal static GuildRosterDelta DiffRosters(GuildSnapshot previous, GuildSnapshot current)
@@ -30,7 +32,7 @@ namespace ErenshorGuildLife
             if (previous == null || current == null) return delta;
             if (!previous.RuntimeAvailable || !current.RuntimeAvailable) return delta;
             if (!previous.InGuild || !current.InGuild) return delta;
-            if (!string.Equals(previous.GuildName, current.GuildName, StringComparison.OrdinalIgnoreCase)) return delta;
+            if (!SameGuild(previous, current)) return delta;
 
             HashSet<string> oldNames = Names(previous.Members);
             HashSet<string> newNames = Names(current.Members);
@@ -51,7 +53,7 @@ namespace ErenshorGuildLife
             if (document == null || string.IsNullOrWhiteSpace(text)) return false;
 
             GuildBulletinEntry value = new GuildBulletinEntry();
-            value.TimestampUtc = utc.Kind == DateTimeKind.Utc ? utc : utc.ToUniversalTime();
+            value.TimestampUtc = NormalizeUtc(utc);
             value.Source = Clean(source, 64);
             value.Category = Clean(category, 64);
             value.Actor = Clean(actor, 96);
@@ -80,8 +82,27 @@ namespace ErenshorGuildLife
         internal static string Clean(string value, int max)
         {
             if (string.IsNullOrWhiteSpace(value)) return string.Empty;
-            string clean = value.Replace('\r', ' ').Replace('\n', ' ').Trim();
+            string clean = value.Replace('\r', ' ').Replace('\n', ' ').Replace('\t', ' ').Replace('\0', ' ').Trim();
             return clean.Length <= max ? clean : clean.Substring(0, max);
+        }
+
+
+        private static bool SameGuild(GuildSnapshot previous, GuildSnapshot current)
+        {
+            if (previous.GuildId > 0 && current.GuildId > 0)
+                return previous.GuildId == current.GuildId;
+
+            if (string.IsNullOrWhiteSpace(previous.GuildName) || string.IsNullOrWhiteSpace(current.GuildName))
+                return false;
+            return string.Equals(previous.GuildName, current.GuildName, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static DateTime NormalizeUtc(DateTime value)
+        {
+            if (value == default(DateTime)) return DateTime.UtcNow;
+            if (value.Kind == DateTimeKind.Utc) return value;
+            try { return value.ToUniversalTime(); }
+            catch { return DateTime.UtcNow; }
         }
 
         private static HashSet<string> Names(List<GuildMemberSnapshot> members)

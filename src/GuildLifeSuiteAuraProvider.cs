@@ -10,10 +10,12 @@ namespace ErenshorGuildLife
     {
         private const string Prefix = "forgetwhtuno.erenshor.suite.guildlife.v1.";
 
-        private readonly IAuraProvider<string> _describe;
-        private readonly IAuraProvider<string> _settings;
-        private readonly IAuraProvider<string, string, string> _setSetting;
-        private readonly IAuraProvider<string, string, string> _action;
+        private IAuraProvider<string> _describe;
+        private IAuraProvider<string> _basicSettings;
+        private IAuraProvider<string> _advancedSettings;
+        private IAuraProvider<string> _uiState;
+        private IAuraProvider<string, string, string> _setSetting;
+        private IAuraProvider<string, string, string> _action;
 
         internal bool Registered { get; private set; }
 
@@ -21,8 +23,12 @@ namespace ErenshorGuildLife
         {
             _describe = owner.IPCAuraProvider<string>(Prefix + "describe");
             _describe.RegisterFunc(Describe);
-            _settings = owner.IPCAuraProvider<string>(Prefix + "settings.basic");
-            _settings.RegisterFunc(Settings);
+            _basicSettings = owner.IPCAuraProvider<string>(Prefix + "settings.basic");
+            _basicSettings.RegisterFunc(BasicSettings);
+            _advancedSettings = owner.IPCAuraProvider<string>(Prefix + "settings.advanced");
+            _advancedSettings.RegisterFunc(AdvancedSettings);
+            _uiState = owner.IPCAuraProvider<string>(Prefix + "ui.state");
+            _uiState.RegisterFunc(UiState);
             _setSetting = owner.IPCAuraProvider<string, string, string>(Prefix + "setting.set");
             _setSetting.RegisterFunc(SetSetting);
             _action = owner.IPCAuraProvider<string, string, string>(Prefix + "action");
@@ -33,10 +39,18 @@ namespace ErenshorGuildLife
         internal void Unregister()
         {
             Registered = false;
-            try { if (_describe != null) _describe.UnregisterFunc(); } catch { }
-            try { if (_settings != null) _settings.UnregisterFunc(); } catch { }
-            try { if (_setSetting != null) _setSetting.UnregisterFunc(); } catch { }
-            try { if (_action != null) _action.UnregisterFunc(); } catch { }
+            Safe(_describe); _describe = null;
+            Safe(_basicSettings); _basicSettings = null;
+            Safe(_advancedSettings); _advancedSettings = null;
+            Safe(_uiState); _uiState = null;
+            Safe(_setSetting); _setSetting = null;
+            Safe(_action); _action = null;
+        }
+
+        private static void Safe(IAuraProvider p)
+        {
+            if (p == null) return;
+            try { p.UnregisterFunc(); } catch { }
         }
 
         private string Describe()
@@ -46,16 +60,35 @@ namespace ErenshorGuildLife
                 + "&module=" + GuildLifeControlApi.ModuleId
                 + "&display=" + Uri.EscapeDataString("Guild Life")
                 + "&version=" + Uri.EscapeDataString(ErenshorGuildLifePlugin.PluginVersion)
-                + "&summary=" + Uri.EscapeDataString("Read-only verified guild roster and local bulletin view.")
+                + "&summary=" + Uri.EscapeDataString("Read-only guild roster and local bulletin.")
                 + "&status=" + Uri.EscapeDataString(SuiteUiControlPolicy.BoundStatus(GuildLifeControlApi.GetStatus()))
                 + "&actions=" + actions;
         }
 
-        private string Settings()
+        private string UiState()
         {
-            return "id=showLauncher&label=" + Uri.EscapeDataString("Show Guild Life launcher") + "&tier=basic&type=bool&value=" + (GuildLifeControlApi.GetShowLauncher() ? "true" : "false") + "&mutable=true"
-                + "\nid=recordRosterChanges&label=" + Uri.EscapeDataString("Record verified roster changes") + "&tier=basic&type=bool&value=" + (GuildLifeControlApi.GetRecordRosterChanges() ? "true" : "false") + "&mutable=true"
-                + "\nid=refreshSeconds&label=" + Uri.EscapeDataString("Roster refresh seconds") + "&tier=basic&type=number&value=" + GuildLifeControlApi.GetRefreshSeconds().ToString() + "&mutable=false";
+            ErenshorGuildLifePlugin p = ErenshorGuildLifePlugin.Instance;
+            return SuiteUiStatePolicy.Build(GuildLifeControlApi.ModuleId,
+                p != null && p.ControlPanelOpen,
+                GuildWindow.CanvasSortOrder,
+                p == null ? 0d : p.ControlPanelActivatedAt);
+        }
+
+        private string BasicSettings()
+        {
+            return "id=showLauncher&label=" + Uri.EscapeDataString("Show Guild Life Launcher")
+                + "&tier=basic&type=bool&value=" + (GuildLifeControlApi.GetShowLauncher() ? "true" : "false")
+                + "&mutable=true";
+        }
+
+        private string AdvancedSettings()
+        {
+            return "id=recordRosterChanges&label=" + Uri.EscapeDataString("Record roster changes")
+                + "&tier=advanced&type=bool&value=" + (GuildLifeControlApi.GetRecordRosterChanges() ? "true" : "false")
+                + "&mutable=true"
+                + "\nid=refreshSeconds&label=" + Uri.EscapeDataString("Roster refresh seconds")
+                + "&tier=advanced&type=number&value=" + GuildLifeControlApi.GetRefreshSeconds().ToString()
+                + "&mutable=false";
         }
 
         private string SetSetting(string settingId, string value)
@@ -81,6 +114,5 @@ namespace ErenshorGuildLife
                 default: return "unknown action";
             }
         }
-
     }
 }
