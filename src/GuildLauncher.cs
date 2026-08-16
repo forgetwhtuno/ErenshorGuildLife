@@ -7,8 +7,8 @@ namespace ErenshorGuildLife
 {
     internal sealed class GuildLauncher
     {
-        internal const float Width = 136f;
-        internal const float Height = 30f;
+        internal const float Width = StandaloneLauncherVisual.Width;
+        internal const float Height = StandaloneLauncherVisual.Height;
 
         private GameObject _root;
         private RectTransform _panel;
@@ -35,6 +35,8 @@ namespace ErenshorGuildLife
             RetainedUiKit.AddImage(grip, RetainedUiKit.Header);
             TextMeshProUGUI diamond = RetainedUiKit.AddLabel("GripLabel", grip, "◇", 14f, FontStyles.Bold, TextAlignmentOptions.Center);
             RetainedUiKit.Stretch(diamond.rectTransform, 0f, 0f, 0f, 0f);
+            diamond.gameObject.SetActive(false);
+            StandaloneLauncherVisual.StyleGrip(grip);
 
             Button button = RetainedUiKit.AddButton("OpenGuildLife", _panel, "GUILD LIFE", delegate { if (_toggle != null) _toggle(); }, Width - 20f, Height, false);
             RectTransform br = button.GetComponent<RectTransform>();
@@ -46,8 +48,8 @@ namespace ErenshorGuildLife
             LayoutElement le = br.GetComponent<LayoutElement>();
             if (le != null) UnityEngine.Object.DestroyImmediate(le);
             _label = button.GetComponentInChildren<TextMeshProUGUI>();
-
-            RetainedUiKit.AddFrame(_panel, 1f);
+            StandaloneLauncherVisual.StyleButton(button, _label);
+            StandaloneLauncherVisual.StyleRoot(_panel);
 
             _position = new RetainedPosition(storedX, storedY, 0.86f, 0.82f, persist);
             SuiteDragHandler drag = grip.gameObject.AddComponent<SuiteDragHandler>();
@@ -63,7 +65,7 @@ namespace ErenshorGuildLife
             if (_root.activeSelf != visible) _root.SetActive(visible);
             if (!visible) return;
             if (_position != null) _position.Resolve(_panel);
-            if (_label != null) _label.text = open ? "GUILD LIFE •" : "GUILD LIFE";
+            if (_label != null) _label.text = open ? "GUILD LIFE [OPEN]" : "GUILD LIFE";
         }
 
         internal void ResetPosition()

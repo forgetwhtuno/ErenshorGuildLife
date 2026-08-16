@@ -14,7 +14,7 @@ namespace ErenshorGuildLife
     {
         internal const string PluginGuid = "forgetwhtuno.erenshor.guildlife";
         internal const string PluginName = "Erenshor Guild Life";
-        internal const string PluginVersion = "0.1.2";
+        internal const string PluginVersion = "0.1.3";
 
         internal static ErenshorGuildLifePlugin Instance;
         private bool _initialized;

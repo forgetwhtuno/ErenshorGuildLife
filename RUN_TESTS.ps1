@@ -70,3 +70,11 @@ if ($guildWindowSource -notmatch 'AddVerticalChevron\(_collapseChevron,\s*!_coll
     throw "Guild Life release polish guard failed: glyph-safe collapse chevron is missing."
 }
 Write-Host "Guild Life release polish collapse-icon guard: PASS" -ForegroundColor Green
+$launcherVisual = Get-Content (Join-Path $ScriptRoot "src\StandaloneLauncherVisual.cs") -Raw
+$launcherSource = Get-Content (Join-Path $ScriptRoot "src\GuildLauncher.cs") -Raw
+if ($launcherVisual -notmatch 'Width\s*=\s*154f' -or $launcherVisual -notmatch 'Height\s*=\s*32f' -or
+    $launcherVisual -notmatch 'GripWidth\s*=\s*20f' -or $launcherVisual -notmatch '"GripDot"' -or
+    $launcherSource -notmatch 'StyleGrip\(grip\)' -or $launcherSource -notmatch 'StyleButton\(button, _label\)') {
+    throw "Guild Life Forgotten Roads launcher visual contract failed."
+}
+Write-Host "Guild Life Forgotten Roads launcher visual contract: PASS" -ForegroundColor Green

@@ -1,4 +1,4 @@
-# Erenshor Guild Life 0.1.2 Release Candidate
+# Erenshor Guild Life 0.1.3 Retained-UI Visual Candidate
 
 Part of the **Forgotten Roads for Erenshor** mod collection.
 
@@ -111,7 +111,7 @@ Then follow `TESTING.md`.
 
 ## Development note
 
-This project has been developed heavily with AI-assisted coding tools. The goal is to build features I wanted to use in Erenshor, with development guided through design, testing, playtesting, audits, and iteration against the game. Bug reports, code review, corrections, and contributions from experienced Erenshor modders are welcome.
+The goal is to build features for Erenshor, with development guided through design, testing, playtesting, audits, and iteration against the game. Bug reports, code review, corrections, and contributions from experienced Erenshor modders are welcome.
 
 This is an unofficial, community-made mod for Erenshor and is not affiliated with or endorsed by the game's developer.
 
