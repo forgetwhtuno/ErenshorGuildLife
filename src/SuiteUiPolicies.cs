@@ -105,17 +105,29 @@ namespace ErenshorGuildLife
     internal sealed class SuiteUiGestureState
     {
         internal bool IsActive { get; private set; }
+        internal bool IsPointerHeld { get; private set; }
 
-        internal void Begin() { IsActive = true; }
+        internal void Press() { IsPointerHeld = true; }
+
+        internal void Begin()
+        {
+            IsPointerHeld = true;
+            IsActive = true;
+        }
 
         internal bool End()
         {
             bool wasActive = IsActive;
             IsActive = false;
+            IsPointerHeld = false;
             return wasActive;
         }
 
-        internal void ForceRelease() { IsActive = false; }
+        internal void ForceRelease()
+        {
+            IsActive = false;
+            IsPointerHeld = false;
+        }
     }
 
 
@@ -246,13 +258,27 @@ namespace ErenshorGuildLife
             if (SuiteUiControlPolicy.BoundStatus("a\nb").IndexOf('\n') >= 0) return "FAIL status newline";
             SuiteUiGestureState gesture = new SuiteUiGestureState();
             if (gesture.IsActive) return "FAIL gesture starts active";
+            if (gesture.IsPointerHeld) return "FAIL gesture starts held";
+            // Pointer-down must record the held pointer WITHOUT starting a move/resize. This is the
+            // window in which ownership is claimed, before Unity's drag threshold is reached, so the
+            // first drag delta cannot leak into the game camera.
+            gesture.Press();
+            if (!gesture.IsPointerHeld) return "FAIL gesture press does not hold pointer";
+            if (gesture.IsActive) return "FAIL gesture press moves before drag threshold";
             gesture.Begin();
             if (!gesture.IsActive) return "FAIL gesture begin";
+            if (!gesture.IsPointerHeld) return "FAIL gesture begin drops pointer hold";
             if (!gesture.End() || gesture.IsActive) return "FAIL gesture end";
+            if (gesture.IsPointerHeld) return "FAIL gesture end retains pointer hold";
             if (gesture.End()) return "FAIL gesture double-end";
+            // A press that never becomes a drag (click) must still fully release ownership.
+            gesture.Press();
+            if (gesture.End()) return "FAIL press-only gesture reported as completed drag";
+            if (gesture.IsPointerHeld || gesture.IsActive) return "FAIL press-only gesture did not release";
             gesture.Begin();
             gesture.ForceRelease();
             if (gesture.IsActive) return "FAIL gesture force release";
+            if (gesture.IsPointerHeld) return "FAIL gesture force release retains pointer hold";
             if (SuiteWindowChromePolicy.ShouldRebuildStructure("same", "same")) return "FAIL dynamic text requires structural rebuild";
             if (!SuiteWindowChromePolicy.ShouldRebuildStructure("old", "new")) return "FAIL structural change not detected";
             if (!SuiteWindowChromePolicy.IsCompactGeometryValid()) return "FAIL compact chrome geometry";

@@ -351,10 +351,18 @@ namespace ErenshorGuildLife
         private readonly SuiteUiGestureState _gesture = new SuiteUiGestureState();
         private bool _owning;
 
-        public void OnPointerDown(PointerEventData eventData) { }
+        public void OnPointerDown(PointerEventData eventData)
+        {
+            if (eventData == null || eventData.button != PointerEventData.InputButton.Left) return;
+            // Claim native UI-drag ownership on pointer-down, before Unity's drag threshold is met.
+            // Otherwise Erenshor can consume the first mouse delta as camera movement.
+            _gesture.Press();
+            ClaimOwnership();
+        }
 
         public void OnBeginDrag(PointerEventData eventData)
         {
+            if (eventData == null || eventData.button != PointerEventData.InputButton.Left) return;
             try
             {
                 if (Target == null) Target = GetComponent<RectTransform>();
@@ -366,12 +374,7 @@ namespace ErenshorGuildLife
                 _startPointer = local;
                 _startPosition = Target.anchoredPosition;
                 _gesture.Begin();
-                if (!_owning)
-                {
-                    _owning = true;
-                    _owners.Add(this);
-                }
-                GameData.DraggingUIElement = true;
+                ClaimOwnership();
             }
             catch (Exception)
             {
@@ -381,9 +384,10 @@ namespace ErenshorGuildLife
 
         public void OnDrag(PointerEventData eventData)
         {
-            if (!_gesture.IsActive || Target == null || _parentRect == null) return;
+            if (eventData == null || eventData.button != PointerEventData.InputButton.Left || !_gesture.IsActive || Target == null || _parentRect == null) return;
             try
             {
+                GuildLifeUiGestureOwnership.Reassert();
                 Vector2 local;
                 if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_parentRect, eventData.position, eventData.pressEventCamera, out local)) return;
                 Vector2 next = _startPosition + (local - _startPointer);
@@ -399,10 +403,18 @@ namespace ErenshorGuildLife
             }
         }
 
-        public void OnEndDrag(PointerEventData eventData) { EndDrag(true); }
-        public void OnPointerUp(PointerEventData eventData) { EndDrag(false); }
-        private void OnDisable() { EndDrag(true); }
-        private void OnDestroy() { EndDrag(true); }
+        public void OnEndDrag(PointerEventData eventData) { if (eventData == null || eventData.button == PointerEventData.InputButton.Left) EndDrag(true); }
+        public void OnPointerUp(PointerEventData eventData) { if (eventData == null || eventData.button == PointerEventData.InputButton.Left) EndDrag(true); }
+        private void Update()
+        {
+            if (!_owning) return;
+            GuildLifeUiGestureOwnership.Reassert();
+            try { if (!Input.GetMouseButton(0)) EndDrag(_gesture.IsActive); } catch (Exception) { EndDrag(false); }
+        }
+        private void OnApplicationFocus(bool focused) { if (!focused) EndDrag(false); }
+        private void OnApplicationPause(bool paused) { if (paused) EndDrag(false); }
+        private void OnDisable() { EndDrag(false); }
+        private void OnDestroy() { EndDrag(false); }
 
         private void EndDrag(bool notify)
         {
@@ -414,15 +426,23 @@ namespace ErenshorGuildLife
             }
         }
 
+        private void ClaimOwnership()
+        {
+            if (!_owning)
+            {
+                _owning = true;
+                _owners.Add(this);
+                GuildLifeUiGestureOwnership.Acquire(this);
+            }
+            GuildLifeUiGestureOwnership.Reassert();
+        }
+
         private void Release()
         {
             if (!_owning) return;
             _owning = false;
             _owners.Remove(this);
-            if (_owners.Count == 0 && !SuiteResizeHandler.HasOwners)
-            {
-                try { GameData.DraggingUIElement = false; } catch (Exception) { }
-            }
+            GuildLifeUiGestureOwnership.Release(this);
         }
 
         internal static void ForceReleaseIfOwned()
@@ -443,10 +463,7 @@ namespace ErenshorGuildLife
                 _owners.Clear();
             }
             SuiteResizeHandler.ForceReleaseIfOwned();
-            if (ownedByThisMod)
-            {
-                try { GameData.DraggingUIElement = false; } catch (Exception) { }
-            }
+            if (ownedByThisMod) GuildLifeUiGestureOwnership.ForceRelease();
         }
     }
 
@@ -465,10 +482,16 @@ namespace ErenshorGuildLife
         private readonly SuiteUiGestureState _gesture = new SuiteUiGestureState();
         private bool _owning;
 
-        public void OnPointerDown(PointerEventData eventData) { }
+        public void OnPointerDown(PointerEventData eventData)
+        {
+            if (eventData == null || eventData.button != PointerEventData.InputButton.Left) return;
+            _gesture.Press();
+            ClaimOwnership();
+        }
 
         public void OnBeginDrag(PointerEventData eventData)
         {
+            if (eventData == null || eventData.button != PointerEventData.InputButton.Left) return;
             try
             {
                 if (Target == null) return;
@@ -479,12 +502,7 @@ namespace ErenshorGuildLife
                 _startPointer = local;
                 _startSize = Target.rect.size;
                 _gesture.Begin();
-                if (!_owning)
-                {
-                    _owning = true;
-                    _owners.Add(this);
-                }
-                GameData.DraggingUIElement = true;
+                ClaimOwnership();
             }
             catch (Exception)
             {
@@ -494,9 +512,10 @@ namespace ErenshorGuildLife
 
         public void OnDrag(PointerEventData eventData)
         {
-            if (!_gesture.IsActive || Target == null || _parentRect == null) return;
+            if (eventData == null || eventData.button != PointerEventData.InputButton.Left || !_gesture.IsActive || Target == null || _parentRect == null) return;
             try
             {
+                GuildLifeUiGestureOwnership.Reassert();
                 Vector2 local;
                 if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_parentRect, eventData.position, eventData.pressEventCamera, out local)) return;
                 Vector2 delta = local - _startPointer;
@@ -516,10 +535,18 @@ namespace ErenshorGuildLife
             }
         }
 
-        public void OnEndDrag(PointerEventData eventData) { EndResize(true); }
-        public void OnPointerUp(PointerEventData eventData) { EndResize(false); }
-        private void OnDisable() { EndResize(true); }
-        private void OnDestroy() { EndResize(true); }
+        public void OnEndDrag(PointerEventData eventData) { if (eventData == null || eventData.button == PointerEventData.InputButton.Left) EndResize(true); }
+        public void OnPointerUp(PointerEventData eventData) { if (eventData == null || eventData.button == PointerEventData.InputButton.Left) EndResize(true); }
+        private void Update()
+        {
+            if (!_owning) return;
+            GuildLifeUiGestureOwnership.Reassert();
+            try { if (!Input.GetMouseButton(0)) EndResize(_gesture.IsActive); } catch (Exception) { EndResize(false); }
+        }
+        private void OnApplicationFocus(bool focused) { if (!focused) EndResize(false); }
+        private void OnApplicationPause(bool paused) { if (paused) EndResize(false); }
+        private void OnDisable() { EndResize(false); }
+        private void OnDestroy() { EndResize(false); }
 
         private void EndResize(bool notify)
         {
@@ -535,15 +562,23 @@ namespace ErenshorGuildLife
             }
         }
 
+        private void ClaimOwnership()
+        {
+            if (!_owning)
+            {
+                _owning = true;
+                _owners.Add(this);
+                GuildLifeUiGestureOwnership.Acquire(this);
+            }
+            GuildLifeUiGestureOwnership.Reassert();
+        }
+
         private void Release()
         {
             if (!_owning) return;
             _owning = false;
             _owners.Remove(this);
-            if (_owners.Count == 0 && !SuiteDragHandler.HasOwners)
-            {
-                try { GameData.DraggingUIElement = false; } catch (Exception) { }
-            }
+            GuildLifeUiGestureOwnership.Release(this);
         }
 
         internal static void ForceReleaseIfOwned()

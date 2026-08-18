@@ -2,6 +2,11 @@
 
 ## Unreleased - bounded Suite UI polish
 
+- Brought retained launcher drag, window-header drag, and the resize gesture up to the current Forgotten Roads standard: gestures are left-button only and claim native UI-drag ownership on **pointer-down** rather than at `OnBeginDrag`, so the first drag delta can no longer leak into the game camera. Ownership now releases on pointer-up, end-drag, loss of the physical left button, focus loss, pause, disable, destroy, and plugin unload.
+- Replaced the blind `GameData.DraggingUIElement = false` release with the shared process-local ownership registry used by the other suite modules. The first suite gesture captures the native baseline and the last owner restores it, so Guild Life can no longer clear a native or sibling mod's drag claim.
+- Added the narrow, fail-closed `CameraController.UsingUI()` containment postfix (monotonic `false -> true` only, and only while Guild Life owns a real pointer gesture). `[HarmonyPrepare]` proves the exact installed method/field/IL relationship before patching; an unrecognized game shape leaves native camera behavior unpatched. This adds the `Harmony` permission, documented in the README.
+- Narrowed the read-only authority test from "no Harmony patch anywhere" to "exactly one patch, and only the proven `CameraController.UsingUI` containment postfix"; prefix/transpiler/finalizer/reverse patches remain forbidden. Added deterministic gesture-lifecycle assertions and source guards for the pointer-down claim, left-button gating, physical/focus/pause release, and shared baseline restoration.
+- Guild authority is unchanged and still read-only: no invites, kicks, rank changes, recruitment, raid starting, movement, or invented guild events.
 - Aligned Guild Life and its launcher with the canonical dark/translucent/cyan Sim Actions palette and added a thin cyan frame.
 - Added a consistent `▾` / `▸` header collapse control. Collapsed Guild Life keeps only the draggable 32px header plus Reset/Close; roster/bulletin content and resize grip are hidden.
 - Collapse/expand preserves the header's screen position and clamps both states without changing the read-only guild authority boundary.

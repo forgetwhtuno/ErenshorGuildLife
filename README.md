@@ -46,7 +46,33 @@ The current Deep Sims code already demonstrates a read-only guild cache based on
 
 Guild Life uses the same *conceptual* seam but resolves the types/members through reflection and fails closed if the current build no longer exposes the expected shape.
 
-It does not Harmony-patch any game method and does not write any Erenshor save.
+It does not write any Erenshor save.
+
+### Permissions and the one camera patch
+
+Guild Life requests `FileAccess`, `Reflection`, and `Harmony`. `FileAccess` stores the local
+per-character bulletin; `Reflection` reads native guild state and proves the camera seam below.
+
+`Harmony` is used for exactly one patch: a postfix on `CameraController.UsingUI()` that keeps a
+retained-UI drag from leaking into the game camera. It is deliberately narrow:
+
+- it can only change `false` to `true`, never the reverse, so ordinary native UI state is untouched;
+- it only reports `true` while Guild Life genuinely owns a live left-button pointer gesture;
+- `[HarmonyPrepare]` proves the exact installed `CameraController` method/field/IL relationship
+  first. If the installed game no longer matches that shape, the patch is never applied and native
+  camera behavior is left exactly as-is (fail closed). No member binding is guessed.
+
+No gameplay method is patched: not guild state, combat, quests, inventory, progression, or
+networking. Guild Life remains read-only — it does not invite, kick, rank, recruit, or start guild
+quests/raids.
+
+Retained-UI drag and resize gestures claim native UI-drag ownership on **pointer-down**, before
+Unity's drag threshold, so the first mouse delta cannot reach the camera. Ownership is coordinated
+through a process-local registry shared with the other Forgotten Roads modules: the first suite
+gesture captures the native value and the last one restores it, so Guild Life can never clear a
+native or sibling mod's claim. Ownership releases on pointer-up, end-drag, loss of the physical
+left button, focus loss, pause, panel close, UI hide, zoning teardown, disable, destroy, plugin
+unload, and exception recovery.
 
 ## Bulletin API
 

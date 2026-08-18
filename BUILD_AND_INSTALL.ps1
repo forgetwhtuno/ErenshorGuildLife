@@ -57,6 +57,13 @@ function Find-Csc {
     throw "csc.exe not found. Install the .NET Framework Developer Pack or Visual Studio Build Tools."
 }
 
+function Find-HarmonyDll([string]$LunarisLib, [string]$Managed) {
+    foreach ($candidate in @((Join-Path $LunarisLib "0Harmony.dll"), (Join-Path $Managed "0Harmony.dll"))) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+    throw "Could not find 0Harmony.dll next to Lunaris.dll or in the game's Managed folder."
+}
+
 $GameDir = Find-Game $GameDir
 $LunarisLibDir = Find-LunarisLibDir $LunarisLibDir $GameDir
 $csc = Find-Csc
@@ -66,6 +73,7 @@ New-Item -ItemType Directory -Force -Path $pluginRoot | Out-Null
 
 $refs = @(
     (Join-Path $LunarisLibDir "Lunaris.dll"),
+    (Find-HarmonyDll $LunarisLibDir $managed),
     (Join-Path $managed "Assembly-CSharp.dll"),
     (Join-Path $managed "netstandard.dll"),
     (Join-Path $managed "UnityEngine.dll"),
