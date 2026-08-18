@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using HarmonyLib;
 using Lunaris;
 using Lunaris.Config;
 using UnityEngine;
@@ -9,16 +10,20 @@ namespace ErenshorGuildLife
 {
     [LunarisPlugin(PluginGuid, PluginVersion, "forgetwhtuno",
         "Read-only guild-presence and verified bulletin layer. Erenshor remains authoritative for guild membership/state.")]
-    [LunarisPermission(LunarisPermission.FileAccess | LunarisPermission.Reflection)]
+    // Harmony/Reflection are used only for the narrow, fail-closed CameraController.UsingUI()
+    // containment postfix (see GuildLifeCameraUiPatch). No gameplay, guild, combat, quest,
+    // inventory, progression, or networking behavior is patched.
+    [LunarisPermission(LunarisPermission.FileAccess | LunarisPermission.Harmony | LunarisPermission.Reflection)]
     public sealed class ErenshorGuildLifePlugin : LunarisPlugin
     {
         internal const string PluginGuid = "forgetwhtuno.erenshor.guildlife";
         internal const string PluginName = "Erenshor Guild Life";
-        internal const string PluginVersion = "0.1.2";
+        internal const string PluginVersion = "0.1.3";
 
         internal static ErenshorGuildLifePlugin Instance;
         private bool _initialized;
         private GuildLifeSuiteAuraProvider _auraProvider;
+        private Harmony _harmony;
 
         private GuildLifeSettings _settings;
         private GuildLifeConfigEntry<float> _launcherX;
@@ -78,6 +83,15 @@ namespace ErenshorGuildLife
             _window = new GuildWindow();
             InitializeRetainedUi();
             _currentScene = CurrentSceneName();
+
+            // Narrow retained-UI camera containment only. HarmonyPrepare proves the exact installed
+            // CameraController shape first; an unproven shape leaves native behavior unpatched.
+            _harmony = new Harmony(PluginGuid);
+            try { _harmony.PatchAll(); }
+            catch (Exception ex)
+            {
+                Logging.LogError("Erenshor Guild Life camera compatibility patch failed (" + ex.GetType().Name + ").");
+            }
 
             // Deliberately no bulletin load and no native guild read here: at Awake there is no
             // verified player character yet. Both happen once IsLocalCharacterReady() is true.
@@ -278,6 +292,8 @@ namespace ErenshorGuildLife
             _store = null;
             _snapshot = null;
             _characterKey = "";
+            try { if (_harmony != null) _harmony.UnpatchSelf(); } catch { }
+            _harmony = null;
             SuiteUiPolicy.Reset();
             if (Instance == this) Instance = null;
         }

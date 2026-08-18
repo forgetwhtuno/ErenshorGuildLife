@@ -42,11 +42,25 @@ $forbiddenPatterns = @(
     '\.LeaveGuild\s*\(',
     '\.StartRaid\s*\(',
     '\.StartGuildQuest\s*\(',
-    '\.SetValue\s*\(',
-    'HarmonyPatch'
+    '\.SetValue\s*\('
 )
 foreach ($pattern in $forbiddenPatterns) {
     if ($guildSource -match $pattern) { throw "Read-only boundary test failed on forbidden source pattern: $pattern" }
+}
+
+# Guild Life is allowed EXACTLY ONE Harmony patch: the narrow, fail-closed retained-UI camera
+# containment postfix on CameraController.UsingUI. Any other patch target would be a gameplay
+# authority expansion, so the guard enumerates every [HarmonyPatch(...)] in src and rejects
+# anything that is not that seam. This replaces the old blanket "no HarmonyPatch anywhere" rule.
+$harmonyPatchAttributes = [regex]::Matches($guildSource, '\[HarmonyPatch\([^\]]*\)\]')
+foreach ($attribute in $harmonyPatchAttributes) {
+    if ($attribute.Value -notmatch '^\[HarmonyPatch\(typeof\(CameraController\),\s*"UsingUI"\)\]$') {
+        throw "Read-only boundary test failed: unexpected Harmony patch target: $($attribute.Value)"
+    }
+}
+if ($harmonyPatchAttributes.Count -gt 1) { throw "Read-only boundary test failed: more than one Harmony patch declared." }
+foreach ($pattern in @('HarmonyPrefix', 'HarmonyTranspiler', 'HarmonyFinalizer', 'HarmonyReversePatch')) {
+    if ($guildSource -match $pattern) { throw "Read-only boundary test failed: only a containment postfix is permitted, found $pattern." }
 }
 if ($guildSource -match 'LunarisPermission\.Network') { throw "Read-only boundary test failed: Guild Life requests network permission." }
 Write-Host "PASS: Guild Life read-only authority source guard"
@@ -70,3 +84,58 @@ if ($guildWindowSource -notmatch 'AddVerticalChevron\(_collapseChevron,\s*!_coll
     throw "Guild Life release polish guard failed: glyph-safe collapse chevron is missing."
 }
 Write-Host "Guild Life release polish collapse-icon guard: PASS" -ForegroundColor Green
+$launcherVisual = Get-Content (Join-Path $ScriptRoot "src\StandaloneLauncherVisual.cs") -Raw
+$launcherSource = Get-Content (Join-Path $ScriptRoot "src\GuildLauncher.cs") -Raw
+if ($launcherVisual -notmatch 'Width\s*=\s*154f' -or $launcherVisual -notmatch 'Height\s*=\s*32f' -or
+    $launcherVisual -notmatch 'GripWidth\s*=\s*20f' -or $launcherVisual -notmatch '"GripDot"' -or
+    $launcherSource -notmatch 'StyleGrip\(grip\)' -or $launcherSource -notmatch 'StyleButton\(button, _label\)') {
+    throw "Guild Life Forgotten Roads launcher visual contract failed."
+}
+Write-Host "Guild Life Forgotten Roads launcher visual contract: PASS" -ForegroundColor Green
+
+# Retained-UI gesture ownership contract. Guild Life must claim native UI-drag ownership on
+# pointer-down, BEFORE the EventSystem drag threshold, or the first drag delta leaks into the game
+# camera. Ownership must then release on every physical/lifecycle path.
+$dragClass = [regex]::Match($guildUiSource, 'internal sealed class SuiteDragHandler[\s\S]*?(?=internal sealed class SuiteResizeHandler)')
+$resizeClass = [regex]::Match($guildUiSource, 'internal sealed class SuiteResizeHandler[\s\S]*?(?=internal sealed class|\z)')
+if (-not $dragClass.Success -or $dragClass.Value -notmatch 'OnPointerDown[\s\S]*?_gesture\.Press\(\)[\s\S]*?ClaimOwnership\(\)') {
+    throw "Guild Life input guard failed: window/launcher drag does not claim ownership on pointer-down."
+}
+if ($dragClass.Value -notmatch 'OnPointerUp[\s\S]*?EndDrag' -or $dragClass.Value -notmatch 'OnDisable[\s\S]*?EndDrag' -or
+    $dragClass.Value -notmatch 'OnDestroy[\s\S]*?EndDrag' -or $dragClass.Value -notmatch 'private\s+void\s+EndDrag[\s\S]*?Release\(\)') {
+    throw "Guild Life input guard failed: drag ownership cleanup path is incomplete."
+}
+if (-not $resizeClass.Success -or $resizeClass.Value -notmatch 'OnPointerDown[\s\S]*?_gesture\.Press\(\)[\s\S]*?ClaimOwnership\(\)' -or
+    $resizeClass.Value -notmatch 'OnPointerUp[\s\S]*?EndResize' -or $resizeClass.Value -notmatch 'OnDisable[\s\S]*?EndResize' -or
+    $resizeClass.Value -notmatch 'OnDestroy[\s\S]*?EndResize') {
+    throw "Guild Life input guard failed: resize ownership claim/cleanup path is incomplete."
+}
+if ($guildUiSource -notmatch 'InputButton\.Left' -or $guildUiSource -notmatch 'Input\.GetMouseButton\(0\)' -or
+    $guildUiSource -notmatch 'OnApplicationFocus' -or $guildUiSource -notmatch 'OnApplicationPause') {
+    throw "Guild Life gesture guard failed: left-only physical/focus/pause lifecycle missing."
+}
+$ownershipSource = Get-Content (Join-Path $ScriptRoot "src\GuildLifeUiGestureOwnership.cs") -Raw
+if ($ownershipSource -notmatch 'ProcessOwnersKey' -or $ownershipSource -notmatch 'RestoreBaseline' -or
+    $ownershipSource -match 'DraggingUIElement\s*=\s*false') {
+    throw "Guild Life ownership guard failed: shared native-baseline restoration is missing, so a sibling mod or native owner could be cleared."
+}
+Write-Host "Guild Life retained-UI gesture ownership contract: PASS" -ForegroundColor Green
+
+# Narrow camera containment contract. The runtime IL proof still runs fail-closed at Harmony prepare
+# time; these checks prevent regression to a guessed or non-monotonic camera patch.
+$cameraSource = Get-Content (Join-Path $ScriptRoot "src\GuildLifeCameraUiPatch.cs") -Raw
+if ($cameraSource -notmatch '\[HarmonyPatch\(typeof\(CameraController\),\s*"UsingUI"\)\]' -or
+    $cameraSource -notmatch '\[HarmonyPrepare\]' -or
+    $cameraSource -notmatch 'if\s*\(!__result\s*&&\s*GuildLifeUiGestureOwnership\.OwnsPointerGesture\)') {
+    throw "Guild Life camera guard failed: fail-closed monotonic UsingUI postfix missing."
+}
+foreach ($token in @('UIWindows', 'activeSelf', 'ModernControls', 'releaseMouse', 'GetAxis', 'DraggingUIElement')) {
+    if ($cameraSource -notmatch [regex]::Escape($token)) { throw "Guild Life camera guard failed: native proof token missing: $token" }
+}
+if ($pluginSource -notmatch '_harmony\.PatchAll\(\)' -or $pluginSource -notmatch '_harmony\.UnpatchSelf\(\)') {
+    throw "Guild Life camera lifecycle guard failed: Harmony patch/unpatch lifecycle is incomplete."
+}
+if ($pluginSource -notmatch 'LunarisPermission\.Harmony') {
+    throw "Guild Life permission guard failed: the camera containment patch requires the declared Harmony permission."
+}
+Write-Host "Guild Life camera containment contract: PASS" -ForegroundColor Green

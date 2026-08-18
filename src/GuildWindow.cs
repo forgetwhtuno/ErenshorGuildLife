@@ -92,7 +92,7 @@ namespace ErenshorGuildLife
             RetainedUiKit.AnchorTopStretch(header, 0f, 0f, 0f, SuiteWindowChromePolicy.HeaderHeight);
             RetainedUiKit.AddImage(header, RetainedUiKit.Header);
             AddCollapseButton(header);
-            TextMeshProUGUI title = RetainedUiKit.AddLabel("Title", header, "ERENSHOR GUILD LIFE", 15f, FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
+            TextMeshProUGUI title = RetainedUiKit.AddLabel("Title", header, "GUILD LIFE", 15f, FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
             RetainedUiKit.Stretch(title.rectTransform, 40f, 0f, 72f, 0f);
             AddHeaderButton(header, "Reset", "R", -38f, reset);
             AddHeaderButton(header, "Close", "X", -6f, close);

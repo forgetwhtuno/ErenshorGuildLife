@@ -1,4 +1,4 @@
-# Erenshor Guild Life 0.1.2 Release Candidate
+# Erenshor Guild Life 0.1.3 Retained-UI Visual Candidate
 
 Part of the **Forgotten Roads for Erenshor** mod collection.
 
@@ -6,7 +6,7 @@ A small read-only guild-presence and verified bulletin layer for Erenshor.
 
 The goal is not to replace Erenshor's Guild Manager. The goal is to make guild membership feel like something that exists **between** raid starts, invites, and roster management.
 
-## What 0.1.2 does
+## What 0.1.3 does
 
 - retained-uGUI `GUILD LIFE` launcher with Suite-style drag/fallback visibility; **no global hotkey**;
 - retained-uGUI roster/bulletin panel with the Suite dark/translucent/cyan frame, visible `▾`/`▸` collapse + reset/close controls, Suite-style drag, retained resize grip, and scrolling;
@@ -46,7 +46,33 @@ The current Deep Sims code already demonstrates a read-only guild cache based on
 
 Guild Life uses the same *conceptual* seam but resolves the types/members through reflection and fails closed if the current build no longer exposes the expected shape.
 
-It does not Harmony-patch any game method and does not write any Erenshor save.
+It does not write any Erenshor save.
+
+### Permissions and the one camera patch
+
+Guild Life requests `FileAccess`, `Reflection`, and `Harmony`. `FileAccess` stores the local
+per-character bulletin; `Reflection` reads native guild state and proves the camera seam below.
+
+`Harmony` is used for exactly one patch: a postfix on `CameraController.UsingUI()` that keeps a
+retained-UI drag from leaking into the game camera. It is deliberately narrow:
+
+- it can only change `false` to `true`, never the reverse, so ordinary native UI state is untouched;
+- it only reports `true` while Guild Life genuinely owns a live left-button pointer gesture;
+- `[HarmonyPrepare]` proves the exact installed `CameraController` method/field/IL relationship
+  first. If the installed game no longer matches that shape, the patch is never applied and native
+  camera behavior is left exactly as-is (fail closed). No member binding is guessed.
+
+No gameplay method is patched: not guild state, combat, quests, inventory, progression, or
+networking. Guild Life remains read-only — it does not invite, kick, rank, recruit, or start guild
+quests/raids.
+
+Retained-UI drag and resize gestures claim native UI-drag ownership on **pointer-down**, before
+Unity's drag threshold, so the first mouse delta cannot reach the camera. Ownership is coordinated
+through a process-local registry shared with the other Forgotten Roads modules: the first suite
+gesture captures the native value and the last one restores it, so Guild Life can never clear a
+native or sibling mod's claim. Ownership releases on pointer-up, end-drag, loss of the physical
+left button, focus loss, pause, panel close, UI hide, zoning teardown, disable, destroy, plugin
+unload, and exception recovery.
 
 ## Bulletin API
 
@@ -99,7 +125,7 @@ powershell -ExecutionPolicy Bypass -File .\BUILD_AND_INSTALL.ps1
 
 The script locates the current Erenshor install and the Lunaris developer reference, compiles, and installs only `ErenshorGuildLife.dll` to `<Erenshor>\plugins\`. Lunaris manages enable/disable and config; local bulletin state moves to `plugins\config\ErenshorGuildLife\`. Native Erenshor guild objects are discovered through reflection at runtime, unchanged. A legacy BepInEx release remains available in this repository's Git history.
 
-**Status:** 0.1.2 is the release-readiness source candidate. Deterministic coverage includes roster identity/diff rules, no-guild behavior, bulletin bounds/dedupe/persistence/recovery, character keys, legacy claim behavior, launcher geometry, and Suite launcher policy. A native compile and live Lunaris gameplay pass still require the current installed Erenshor/Lunaris reference DLLs.
+**Status:** 0.1.3 is the retained-UI visual candidate. Deterministic coverage includes roster identity/diff rules, no-guild behavior, bulletin bounds/dedupe/persistence/recovery, character keys, legacy claim behavior, launcher geometry, Suite launcher policy, collapse behavior, and player-ready/deferred-toggle handling. A fresh native compile, plugin-identity audit, and live Lunaris gameplay pass remain required.
 
 ## Testing
 
@@ -111,7 +137,7 @@ Then follow `TESTING.md`.
 
 ## Development note
 
-This project has been developed heavily with AI-assisted coding tools. The goal is to build features I wanted to use in Erenshor, with development guided through design, testing, playtesting, audits, and iteration against the game. Bug reports, code review, corrections, and contributions from experienced Erenshor modders are welcome.
+The goal is to build features for Erenshor, with development guided through design, testing, playtesting, audits, and iteration against the game. Bug reports, code review, corrections, and contributions from experienced Erenshor modders are welcome.
 
 This is an unofficial, community-made mod for Erenshor and is not affiliated with or endorsed by the game's developer.
 
